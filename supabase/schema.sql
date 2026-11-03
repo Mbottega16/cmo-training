@@ -54,6 +54,13 @@ create table if not exists public.invites (
   check (role = 'coach' or player_id is not null)
 );
 
+-- Wrong invite codes per account, to stop guessing.
+create table if not exists public.invite_attempts (
+  id bigserial primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  at timestamptz not null default now()
+);
+
 create table if not exists public.sessions (
   id text primary key default ('s_' || replace(gen_random_uuid()::text, '-', '')),
   title text not null check (length(title) between 1 and 120),
@@ -135,6 +142,12 @@ $$;
 create or replace function public.is_staff() returns boolean
 language sql stable security definer set search_path = public as $$
   select public.app_role() in ('coach', 'dev');
+$$;
+
+-- Signed up AND accepted an invite (or the owner). New accounts without an invite see nothing.
+create or replace function public.is_member() returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.app_role() in ('coach', 'dev', 'athlete');
 $$;
 
 -- New accounts start as 'pending' until they enter an invite code. The owner's address becomes 'dev'.
@@ -321,7 +334,7 @@ $$;
 create or replace function public.expire_grace() returns json
 language plpgsql security definer set search_path = public as $$
 begin
-  if public.app_role() = 'anon' then return public._result(false, 'Sign in first.'); end if;
+  if not public.is_member() then return public._result(false, 'Sign in first.'); end if;
   perform public._expire_grace_all();
   return public._result(true, '');
 end;
@@ -410,7 +423,7 @@ language sql stable security definer set search_path = public as $$
   cross join public.settings st
   left join public.bookings b on b.session_id = s.id
     and (b.status = 'confirmed' or (st.late_spot = 'lock' and b.status in ('cancelled_late', 'forfeited')))
-  where st.id = 1 and public.app_role() <> 'anon'
+  where st.id = 1 and public.is_member()
   group by s.id, s.max_capacity;
 $$;
 
@@ -434,8 +447,14 @@ language plpgsql security definer set search_path = public as $$
 declare i public.invites;
 begin
   if auth.uid() is null then return public._result(false, 'Sign in first.'); end if;
+  if (select count(*) from public.invite_attempts where user_id = auth.uid() and at > now() - interval '1 hour') >= 10 then
+    return public._result(false, 'Too many wrong codes. Wait an hour, or ask Coach to check the code.');
+  end if;
   select * into i from public.invites where code = upper(trim(p_code)) for update;
-  if i.code is null or i.used_by is not null then return public._result(false, 'That invite code is not valid or was already used.'); end if;
+  if i.code is null or i.used_by is not null or i.created_at < now() - interval '14 days' then
+    insert into public.invite_attempts (user_id) values (auth.uid());
+    return public._result(false, 'That invite code is not valid, has expired (14 days), or was already used.');
+  end if;
   if public.app_role() = 'dev' then return public._result(false, 'The owner account does not need an invite.'); end if;
   update public.profiles set role = i.role, player_id = case when i.role = 'athlete' then i.player_id else null end where user_id = auth.uid();
   update public.invites set used_by = auth.uid(), used_at = now() where code = i.code;
@@ -466,9 +485,10 @@ alter table public.homework enable row level security;
 alter table public.films enable row level security;
 alter table public.coach_notes enable row level security;
 alter table public.notify_prefs enable row level security;
+alter table public.invite_attempts enable row level security; -- no policies: only the functions above touch it
 
 drop policy if exists settings_read on public.settings;
-create policy settings_read on public.settings for select to authenticated using (true);
+create policy settings_read on public.settings for select to authenticated using (public.is_member());
 drop policy if exists settings_write on public.settings;
 create policy settings_write on public.settings for update to authenticated using (public.is_staff()) with check (public.is_staff());
 
@@ -488,7 +508,7 @@ drop policy if exists invites_read on public.invites;
 create policy invites_read on public.invites for select to authenticated using (public.is_staff());
 
 drop policy if exists sessions_read on public.sessions;
-create policy sessions_read on public.sessions for select to authenticated using (true);
+create policy sessions_read on public.sessions for select to authenticated using (public.is_member());
 drop policy if exists sessions_insert on public.sessions;
 create policy sessions_insert on public.sessions for insert to authenticated with check (public.is_staff());
 drop policy if exists sessions_update on public.sessions;

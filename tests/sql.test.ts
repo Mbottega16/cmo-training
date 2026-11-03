@@ -110,6 +110,8 @@ test('privacy: athletes see only themselves; strangers and anonymous visitors se
   assert.deepEqual((await as(JORDAN, 'select id from players')).map(r => r.id), ['p1']);
   assert.equal((await as(JORDAN, `select * from bookings where player_id = 'p2'`)).length, 0, "can't see Marcus's bookings");
   assert.equal((await as(STRANGER, 'select * from players')).length, 0);
+  assert.equal((await as(STRANGER, 'select * from sessions')).length, 0, 'signed up without an invite: no schedule either');
+  assert.equal((await as(STRANGER, 'select * from spots_left()')).length, 0);
   assert.equal((await as(null, 'select * from players')).length, 0);
   assert.equal((await as(null, 'select * from sessions')).length, 0);
   assert.equal((await as(JORDAN, 'select * from coach_notes')).length, 0);
@@ -282,4 +284,16 @@ test('owner-only: roles can be changed by the owner, never by themselves or othe
   assert.equal((await rpc(JORDAN, 'set_role', [JORDAN, 'coach'])).ok, false);
   assert.equal((await rpc(OWNER, 'set_role', [OWNER, 'pending'])).ok, false, "owner can't lock themselves out");
   assert.equal((await rpc(OWNER, 'set_role', [STRANGER, 'coach'])).ok, true);
+});
+
+test('invite codes expire after 14 days, and 10 wrong guesses in an hour lock the account out', async () => {
+  await admin(`insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000009', 'guesser@example.com')`);
+  const GUESSER = '00000000-0000-0000-0000-000000000009';
+  const old = await rpc(COACH, 'create_invite', ['athlete', 'p2']);
+  await admin(`update invites set created_at = now() - interval '15 days' where code = $1`, [old.code]);
+  assert.match((await rpc(GUESSER, 'claim_invite', [old.code])).message!, /expired/);
+  for (let i = 0; i < 9; i++) await rpc(GUESSER, 'claim_invite', [`BAD${i}0000`]);
+  const fresh = await rpc(COACH, 'create_invite', ['athlete', 'p2']);
+  assert.match((await rpc(GUESSER, 'claim_invite', [fresh.code])).message!, /Too many/, 'locked out even with a right code');
+  assert.equal((await as(GUESSER, 'select * from invite_attempts')).length, 0, 'attempt log is private');
 });

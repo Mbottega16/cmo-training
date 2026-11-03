@@ -53,7 +53,7 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
 ## Commands & Verification
 - `npm run dev` — 127.0.0.1:5173 or the next free port (other projects on the Mac use 5173). `npm run phone` serves
   the built app to Wi-Fi.
-- `npm test` — 19 rule tests (`tests/logic.test.ts`) + 16 database tests (`tests/sql.test.ts`, real Postgres via
+- `npm test` — 19 rule tests (`tests/logic.test.ts`) + 17 database tests (`tests/sql.test.ts`, real Postgres via
   PGlite with stand-ins for Supabase's auth/storage/realtime). Node 23.6+.
 - `npm run build` — `tsc` + Vite. Must pass with zero errors.
 - Browser checks (not committed; recipe in the vault's `skills/web-bible`): real Chrome (`channel: 'chrome'`) at
@@ -78,7 +78,7 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
   athlete edits, demo export/import/reset, people & roles); coach Manage tab; free Supabase backend (schema + RLS +
   server-side rules + invites + storage + realtime + cron) behind a Backend interface; real two-way WebRTC calls;
   late-cancel fix (refill refunds, trusted clock, staff-only waive); GitHub Pages deploy + keep-awake; MIT licence.
-- **Current State:** 35/35 unit+SQL tests; Chrome 49/49 browser checks, 0 console errors; WebKit 11/11; axe 0
+- **Current State:** 36/36 unit+SQL tests; Chrome 49/49 browser checks, 0 console errors; WebKit 11/11; axe 0
   violations on 22 screen/size combinations. Pages deploys in demo mode until the Supabase variables exist.
 - **Next Up:** Owner creates the free Supabase project (SETUP-BACKEND.md), then verify the live backend end to end
   (sign-up, invites, booking on two phones, a call across two networks). Then: reminders (web push), Stripe (needs a yes).

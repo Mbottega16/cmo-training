@@ -22,6 +22,11 @@ Everything here is on **Supabase's free plan**: no card needed.
 Supabase's free e-mail service only sends to people on your Supabase team, so the app is built to need no e-mails.
 **Authentication** → **Sign In / Providers** → **Email** → turn **off** "Confirm email" → Save. Leave sign-ups on.
 
+## 3b. Create your owner account first (before connecting the app)
+**Authentication** → **Users** → **Add user** → **Create new user**: your e-mail from step 2 and a strong password,
+tick "Auto confirm". You are now the owner. Doing this before the app is public means nobody else can claim your
+address first.
+
 ## 4. Connect the hosted app
 1. In Supabase: **Project Settings** → **API**. Copy the **Project URL** and the **anon / publishable key**.
    Both are meant to be public; the database rules protect the data. Never share the `service_role` / secret key.
@@ -33,14 +38,14 @@ Supabase's free e-mail service only sends to people on your Supabase team, so th
    real backend.
 
 ## 5. First sign-in
-1. Open `https://mbottega16.github.io/cmo-training/dev/` → **Create an account** with the e-mail from step 2.
-   You're the owner.
+1. Open `https://mbottega16.github.io/cmo-training/dev/` and **sign in** with the owner account from step 3b.
 2. **Dev tools → People and roles → Create a coach invite code.** Send the code and the coach page link
    (`…/cmo-training/coach/`) to the coach. They create an account and enter the code once.
 3. The coach adds athletes on **Manage**, then taps **Invite** next to each one and sends the athlete the code and the
    athlete page link (`…/cmo-training/athlete/`).
 
 ## Good to know
+- **Invite codes** expire after 14 days; 10 wrong codes in an hour lock that account out for an hour.
 - **Free limits:** 500 MB of data, 1 GB of files (game film counts here; each clip up to 50 MB), 50,000 users.
 - **Pausing:** Supabase pauses free projects after 7 days with no use. The repo's "Keep the free backend awake"
   workflow pings it every 3 days, so this shouldn't happen. If it ever does, press **Restore** in the Supabase
