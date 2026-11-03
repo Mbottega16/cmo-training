@@ -1,432 +1,714 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Play, Pause, RotateCcw, Volume2, Mic, Square, Trash2, 
-  PenTool, Circle, MoveRight, Check, MessageSquare, Clock, Plus, Send 
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  Play, Pause, Volume2, Mic, Square, Trash2, PenTool, Circle, MoveRight, MessageSquare, Clock, Plus,
+  Undo2, Upload, Pencil, AlertTriangle, StopCircle
 } from 'lucide-react';
-import type { FilmReview } from '../types';
+import type { DrawTool, FilmReview, Point, Stroke } from '../types';
+import type { DemoStore } from '../store';
+import { addStroke, clearFrame, findFrame, undoStroke, uid } from '../logic';
+import { deleteMedia, getMedia, MAX_VIDEO_BYTES, putMedia } from '../media';
+import { formatSecs, useNow } from '../format';
+import { AthletePicker } from './ui';
+
+const FRAME_SECONDS = 1 / 30;
+const MAX_MEMO_SECONDS = 60;
+const COLORS = [
+  { hex: '#facc15', label: 'Yellow' },
+  { hex: '#ef4444', label: 'Red' },
+  { hex: '#06b6d4', label: 'Cyan' },
+  { hex: '#ffffff', label: 'White' }
+];
 
 interface FilmBreakdownStudioProps {
-  initialReview: FilmReview;
+  store: DemoStore;
+  mode: 'coach' | 'athlete';
+  athleteId: string;
+  onAthleteChange?: (id: string) => void;
 }
 
-export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ initialReview }) => {
+function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, w: number, h: number) {
+  const pts = stroke.points.map(p => ({ x: p.x * w, y: p.y * h }));
+  if (pts.length === 0) return;
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = Math.max(2.5, w / 220);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  if (stroke.tool === 'pen') {
+    ctx.moveTo(pts[0].x, pts[0].y);
+    pts.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+    if (pts.length === 1) ctx.lineTo(pts[0].x + 0.1, pts[0].y + 0.1);
+    ctx.stroke();
+    return;
+  }
+  const [a, b = a] = pts;
+  if (stroke.tool === 'circle') {
+    ctx.arc(a.x, a.y, Math.hypot(b.x - a.x, b.y - a.y), 0, 2 * Math.PI);
+    ctx.stroke();
+    return;
+  }
+  const head = Math.max(12, w / 45);
+  const angle = Math.atan2(b.y - a.y, b.x - a.x);
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.moveTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(b.x, b.y);
+  ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6));
+  ctx.stroke();
+}
+
+function micErrorMessage(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : '';
+  if (name === 'NotAllowedError') return 'Microphone permission was denied. Allow it in the browser settings and try again.';
+  if (name === 'NotFoundError') return 'No microphone was found on this device.';
+  return 'The microphone could not start.';
+}
+
+type FeedItem =
+  | { kind: 'note'; id: string; t: number; text: string; author: string }
+  | { kind: 'memo'; id: string; t: number; duration: number; mediaKey: string }
+  | { kind: 'drawing'; id: string; t: number; count: number };
+
+export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store, mode, athleteId, onAthleteChange }) => {
+  const { state, update } = store;
+  const isCoach = mode === 'coach';
+  const athlete = state.players.find(p => p.id === athleteId) ?? state.players[0];
+  const films = state.films.filter(f => f.playerId === athlete?.id);
+  const [selectedFilmId, setSelectedFilmId] = useState<string | null>(null);
+  const film: FilmReview | undefined = films.find(f => f.id === selectedFilmId) ?? films[0];
+  const filmId = film?.id;
+
+  const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [tool, setTool] = useState<'pen' | 'arrow' | 'circle'>('pen');
-  const [color, setColor] = useState('#facc15'); // Neon yellow default
-  const [notes, setNotes] = useState(initialReview.notes);
+  const [tool, setTool] = useState<DrawTool>('pen');
+  const [color, setColor] = useState(COLORS[0].hex);
   const [newNoteText, setNewNoteText] = useState('');
-  
-  // Voice Recording state
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
-  const [voiceNotes, setVoiceNotes] = useState<{ id: string; timestamp: number; duration: number }[]>([
-    { id: 'v1', timestamp: 3.2, duration: 8 }
-  ]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordStartedAt, setRecordStartedAt] = useState<number | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [playingMemo, setPlayingMemo] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const now = useNow(isRecording ? 250 : 5000);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isDrawing = useRef(false);
-  const startPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const boxRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const draft = useRef<{ stroke: Stroke; time: number } | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordTimer = useRef<number | null>(null);
+  const audioRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
 
-  // Handle Video Time Updates
-  const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
-    }
-  };
+  const updateFilm = useCallback(
+    (id: string, fn: (f: FilmReview) => FilmReview) => update(s => ({ ...s, films: s.films.map(f => (f.id === id ? fn(f) : f)) })),
+    [update]
+  );
 
-  const handleLoadedMetadata = () => {
-    if (videoRef.current) {
-      setDuration(videoRef.current.duration);
-      syncCanvasDimensions();
-    }
-  };
+  // A new athlete starts on their first film.
+  useEffect(() => setSelectedFilmId(null), [athleteId]);
 
-  const syncCanvasDimensions = () => {
-    if (canvasRef.current && videoRef.current) {
-      canvasRef.current.width = videoRef.current.clientWidth;
-      canvasRef.current.height = videoRef.current.clientHeight;
+  // Resolve the video: a web sample, or a clip stored in this browser.
+  useEffect(() => {
+    setVideoError(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    if (!film) {
+      setVideoSrc(undefined);
+      return;
     }
-  };
+    if (film.videoUrl) {
+      setVideoSrc(film.videoUrl);
+      return;
+    }
+    if (!film.videoKey) {
+      setVideoSrc(undefined);
+      return;
+    }
+    let cancelled = false;
+    let url: string | undefined;
+    setVideoSrc(undefined);
+    getMedia(film.videoKey)
+      .then(blob => {
+        if (cancelled) return;
+        if (!blob) {
+          setVideoError('This clip was saved in a different browser, or the browser cleared it. Load the file again.');
+          return;
+        }
+        url = URL.createObjectURL(blob);
+        setVideoSrc(url);
+      })
+      .catch(() => !cancelled && setVideoError('This browser could not open its saved clips.'));
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filmId, film?.videoUrl, film?.videoKey]);
+
+  // Stop any recording or playback when leaving the studio.
+  useEffect(
+    () => () => {
+      recorderRef.current?.state === 'recording' && recorderRef.current.stop();
+      if (recordTimer.current) window.clearTimeout(recordTimer.current);
+      if (audioRef.current) {
+        audioRef.current.audio.pause();
+        URL.revokeObjectURL(audioRef.current.url);
+      }
+    },
+    []
+  );
+
+  const visibleFrame = film && !isPlaying ? findFrame(film.drawings, currentTime) : undefined;
+
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const box = boxRef.current;
+    if (!canvas || !box) return;
+    const { width, height } = box.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const pw = Math.round(width * dpr);
+    const ph = Math.round(height * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    visibleFrame?.strokes.forEach(s => drawStroke(ctx, s, width, height));
+    if (draft.current) drawStroke(ctx, draft.current.stroke, width, height);
+    // filmId: the video box mounts when the first film appears, so sizing must re-run then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleFrame, filmId]);
+
+  useLayoutEffect(() => {
+    redraw();
+  }, [redraw]);
 
   useEffect(() => {
-    window.addEventListener('resize', syncCanvasDimensions);
-    return () => window.removeEventListener('resize', syncCanvasDimensions);
-  }, []);
+    const box = boxRef.current;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => redraw());
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [redraw]);
+
+  if (!athlete) return null;
+
+  const pause = () => videoRef.current?.pause();
 
   const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused || v.ended) {
+      v.play().catch(() => setVideoError('The video could not play. Tap play again, or load a different clip.'));
+    } else {
+      v.pause();
     }
   };
 
-  const seekTo = (time: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = time;
-      setCurrentTime(time);
+  const seekTo = (t: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    v.currentTime = t;
+    setCurrentTime(t);
+  };
+
+  const stepFrame = (dir: 1 | -1) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    const t = Math.max(0, Math.min(v.duration || 0, v.currentTime + dir * FRAME_SECONDS));
+    v.currentTime = t;
+    setCurrentTime(t);
+  };
+
+  const toPoint = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height))
+    };
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isCoach || !film || !videoSrc) return;
+    e.preventDefault();
+    pause();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const p = toPoint(e);
+    const time = videoRef.current?.currentTime ?? currentTime;
+    draft.current = { stroke: { id: uid('st'), tool, color, points: tool === 'pen' ? [p] : [p, p] }, time };
+    redraw();
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = draft.current;
+    if (!d) return;
+    const p = toPoint(e);
+    if (d.stroke.tool === 'pen') d.stroke.points.push(p);
+    else d.stroke.points[1] = p;
+    redraw();
+  };
+
+  const onPointerUp = () => {
+    const d = draft.current;
+    draft.current = null;
+    if (!d || !film) return;
+    const [a, b] = d.stroke.points;
+    const big = d.stroke.tool === 'pen' ? d.stroke.points.length > 1 : b && Math.hypot(b.x - a.x, b.y - a.y) > 0.01;
+    if (big) {
+      setCurrentTime(d.time);
+      updateFilm(film.id, f => ({ ...f, drawings: addStroke(f.drawings, d.time, d.stroke) }));
+    } else {
+      redraw();
     }
   };
 
-  const stepFrame = (seconds: number) => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      setIsPlaying(false);
-      videoRef.current.currentTime = Math.max(0, Math.min(duration, videoRef.current.currentTime + seconds));
-    }
-  };
-
-  // Canvas Drawing Handlers (Telestrator)
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Automatically pause video when drawing starts so the coach can telestrate the exact frame
-    if (videoRef.current && isPlaying) {
-      videoRef.current.pause();
-      setIsPlaying(false);
-    }
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    isDrawing.current = true;
-    startPos.current = { x, y };
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    if (tool === 'pen') {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    }
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (tool === 'pen') {
-      ctx.lineTo(x, y);
-      ctx.stroke();
-    }
-  };
-
-  const stopDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing.current) return;
-    isDrawing.current = false;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    if (tool === 'circle') {
-      const radius = Math.sqrt(Math.pow(x - startPos.current.x, 2) + Math.pow(y - startPos.current.y, 2));
-      ctx.beginPath();
-      ctx.arc(startPos.current.x, startPos.current.y, radius, 0, 2 * Math.PI);
-      ctx.stroke();
-    } else if (tool === 'arrow') {
-      drawArrow(ctx, startPos.current.x, startPos.current.y, x, y);
-    }
-  };
-
-  const drawArrow = (ctx: CanvasRenderingContext2D, fromx: number, fromy: number, tox: number, toy: number) => {
-    const headlen = 12;
-    const dx = tox - fromx;
-    const dy = toy - fromy;
-    const angle = Math.atan2(dy, dx);
-    ctx.beginPath();
-    ctx.moveTo(fromx, fromy);
-    ctx.lineTo(tox, toy);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(tox, toy);
-    ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
-    ctx.stroke();
-  };
-
-  const clearTelestrator = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-  };
-
-  // Add Timestamped Note
   const handleAddNote = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newNoteText.trim()) return;
-
-    setNotes(prev => [
-      ...prev,
-      { timestamp: parseFloat(currentTime.toFixed(1)), text: newNoteText.trim(), author: 'Coach' }
-    ].sort((a, b) => a.timestamp - b.timestamp));
-
+    const text = newNoteText.trim();
+    if (!text || !film) return;
+    const t = Math.round((videoRef.current?.currentTime ?? currentTime) * 10) / 10;
+    updateFilm(film.id, f => ({ ...f, notes: [...f.notes, { id: uid('n'), timestamp: t, text, author: 'Coach' }].sort((a, b) => a.timestamp - b.timestamp) }));
     setNewNoteText('');
   };
 
-  // Voice Note toggle simulation
-  const toggleVoiceRecording = () => {
-    if (!isRecordingVoice) {
-      setIsRecordingVoice(true);
-    } else {
-      setIsRecordingVoice(false);
-      setVoiceNotes(prev => [
-        ...prev,
-        { id: 'v_' + Date.now(), timestamp: parseFloat(currentTime.toFixed(1)), duration: 6 }
-      ]);
+  const startRecording = async () => {
+    if (!film) return;
+    setMediaError(null);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setMediaError('Voice memos need a secure (https) address and a browser that can record audio.');
+      return;
+    }
+    let mic: MediaStream;
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      setMediaError(micErrorMessage(err));
+      return;
+    }
+    pause();
+    const at = Math.round((videoRef.current?.currentTime ?? currentTime) * 10) / 10;
+    const forFilm = film.id;
+    const chunks: Blob[] = [];
+    const rec = new MediaRecorder(mic);
+    const startedAt = Date.now();
+    rec.ondataavailable = e => e.data.size > 0 && chunks.push(e.data);
+    rec.onstop = async () => {
+      mic.getTracks().forEach(t => t.stop());
+      setIsRecording(false);
+      setRecordStartedAt(null);
+      if (recordTimer.current) window.clearTimeout(recordTimer.current);
+      const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      if (blob.size === 0) {
+        setMediaError('Nothing was recorded.');
+        return;
+      }
+      const key = uid('vm');
+      try {
+        await putMedia(key, blob);
+        updateFilm(forFilm, f => ({ ...f, voiceNotes: [...f.voiceNotes, { id: uid('v'), timestamp: at, duration: seconds, mediaKey: key }] }));
+      } catch {
+        setMediaError('The memo could not be saved. This browser may be out of storage.');
+      }
+    };
+    rec.start();
+    recorderRef.current = rec;
+    setIsRecording(true);
+    setRecordStartedAt(startedAt);
+    recordTimer.current = window.setTimeout(() => rec.state === 'recording' && rec.stop(), MAX_MEMO_SECONDS * 1000);
+  };
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
+  };
+
+  const stopMemo = () => {
+    if (audioRef.current) {
+      audioRef.current.audio.pause();
+      URL.revokeObjectURL(audioRef.current.url);
+      audioRef.current = null;
+    }
+    setPlayingMemo(null);
+  };
+
+  const playMemo = async (id: string, mediaKey: string, t: number) => {
+    stopMemo();
+    seekTo(t);
+    setMediaError(null);
+    try {
+      const blob = await getMedia(mediaKey);
+      if (!blob) {
+        setMediaError('This memo was recorded in a different browser, or the browser cleared it.');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = { audio, url };
+      audio.onended = stopMemo;
+      setPlayingMemo(id);
+      await audio.play();
+    } catch {
+      stopMemo();
+      setMediaError('The memo could not play.');
     }
   };
 
-  const formatSecs = (s: number) => {
-    const mins = Math.floor(s / 60);
-    const secs = Math.floor(s % 60);
-    const ms = Math.floor((s % 1) * 10);
-    return `${mins}:${secs.toString().padStart(2, '0')}.${ms}`;
+  const deleteMemo = (id: string, mediaKey: string) => {
+    if (!film) return;
+    if (playingMemo === id) stopMemo();
+    void deleteMedia(mediaKey).catch(() => undefined);
+    updateFilm(film.id, f => ({ ...f, voiceNotes: f.voiceNotes.filter(v => v.id !== id) }));
   };
+
+  const deleteNote = (id: string) => film && updateFilm(film.id, f => ({ ...f, notes: f.notes.filter(n => n.id !== id) }));
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setMediaError(null);
+    if (!file.type.startsWith('video/')) {
+      setMediaError('That file is not a video.');
+      return;
+    }
+    if (file.size > MAX_VIDEO_BYTES) {
+      setMediaError(`That clip is ${Math.round(file.size / 1048576)} MB. The demo keeps clips up to ${MAX_VIDEO_BYTES / 1048576} MB; trim it first.`);
+      return;
+    }
+    setUploading(true);
+    const key = uid('vid');
+    try {
+      await putMedia(key, file);
+      const review: FilmReview = {
+        id: uid('f'),
+        playerId: athlete.id,
+        title: file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Game film',
+        videoKey: key,
+        uploadedAt: new Date().toISOString(),
+        notes: [],
+        voiceNotes: [],
+        drawings: []
+      };
+      update(s => ({ ...s, films: [review, ...s.films] }));
+      setSelectedFilmId(review.id);
+    } catch {
+      setMediaError('The clip could not be saved. This browser may be out of storage.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const deleteFilm = () => {
+    if (!film || !window.confirm(`Delete “${film.title}” with all its notes, drawings and voice memos?`)) return;
+    stopMemo();
+    if (film.videoKey) void deleteMedia(film.videoKey).catch(() => undefined);
+    film.voiceNotes.forEach(v => void deleteMedia(v.mediaKey).catch(() => undefined));
+    update(s => ({ ...s, films: s.films.filter(f => f.id !== film.id) }));
+    setSelectedFilmId(null);
+  };
+
+  const feed: FeedItem[] = film
+    ? [
+        ...film.notes.map(n => ({ kind: 'note' as const, id: n.id, t: n.timestamp, text: n.text, author: n.author })),
+        ...film.voiceNotes.map(v => ({ kind: 'memo' as const, id: v.id, t: v.timestamp, duration: v.duration, mediaKey: v.mediaKey })),
+        ...film.drawings.map(d => ({ kind: 'drawing' as const, id: d.id, t: d.timestamp, count: d.strokes.length }))
+      ].sort((a, b) => a.t - b.t)
+    : [];
+
+  const recordedSeconds = recordStartedAt ? Math.floor((now.getTime() - recordStartedAt) / 1000) : 0;
 
   return (
     <div className="space-y-4">
-      {/* Studio Header */}
       <div className="bg-brand-card border border-brand-border rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-brand-orange"></span>
-            <h2 className="text-base font-bold text-white">Interactive Telestrator & Film Studio</h2>
-            <span className="text-[10px] bg-brand-surface border border-brand-border px-2 py-0.5 rounded text-brand-orange font-semibold">
-              ASYNCHRONOUS REVIEW
-            </span>
-          </div>
+        <div className="min-w-0">
+          <h2 className="text-base font-bold text-white">{isCoach ? 'Film Studio' : 'Film from Coach'}</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Analyzing: <span className="text-slate-200 font-medium">{initialReview.title}</span>
+            {isCoach ? 'Pause on a frame and draw on it. Drawings, notes and voice memos stay on that moment of the clip.' : 'Tap any note, drawing or memo to jump to that moment.'}
           </p>
         </div>
-
-        <button
-          onClick={clearTelestrator}
-          className="text-xs bg-brand-surface border border-brand-border hover:border-red-500/40 text-slate-300 hover:text-red-400 px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Clear Drawings
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Main Video & Telestrator Canvas */}
-        <div className="lg:col-span-2 bg-brand-card border border-brand-border rounded-2xl overflow-hidden flex flex-col">
-          {/* Video Container with Overlaid Canvas */}
-          <div className="relative aspect-video bg-black flex items-center justify-center select-none">
-            <video
-              ref={videoRef}
-              src={initialReview.videoUrl}
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              className="w-full h-full object-contain"
-              playsInline
-            />
-
-            {/* Telestrator Drawing Layer */}
-            <canvas
-              ref={canvasRef}
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
-              className="absolute inset-0 w-full h-full cursor-crosshair z-10"
-            />
-
-            {/* Frame Indicator */}
-            <div className="absolute top-3 left-3 z-20 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-mono text-brand-orange border border-white/10">
-              {formatSecs(currentTime)} / {formatSecs(duration)}
-            </div>
-          </div>
-
-          {/* Interactive Telestrator Tool Toolbar */}
-          <div className="p-3 bg-brand-surface border-t border-brand-border flex flex-wrap items-center justify-between gap-3 text-xs">
-            {/* Tool selectors */}
-            <div className="flex items-center gap-1 bg-brand-card p-1 rounded-xl border border-brand-border">
-              <button
-                onClick={() => setTool('pen')}
-                className={`p-1.5 rounded-lg transition-all ${
-                  tool === 'pen' ? 'bg-brand-orange text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Pen / Freehand"
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {isCoach && onAthleteChange && <AthletePicker players={state.players} value={athlete.id} onChange={onAthleteChange} />}
+          {films.length > 1 && (
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              <span className="sr-only">Film</span>
+              <select
+                value={film?.id}
+                onChange={e => setSelectedFilmId(e.target.value)}
+                className="bg-brand-surface border border-brand-border rounded-xl px-3 py-2 text-sm text-white min-h-[40px] max-w-[14rem]"
               >
-                <PenTool className="w-4 h-4" />
-              </button>
+                {films.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {isCoach && (
+            <div className="flex items-center gap-2">
+              <input ref={fileRef} type="file" accept="video/*" className="hidden" onChange={handleFile} />
               <button
-                onClick={() => setTool('arrow')}
-                className={`p-1.5 rounded-lg transition-all ${
-                  tool === 'arrow' ? 'bg-brand-orange text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Driving Lane Arrow"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="min-h-[40px] text-xs bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
               >
-                <MoveRight className="w-4 h-4" />
+                <Upload className="w-3.5 h-3.5" /> {uploading ? 'Saving…' : 'Load film'}
               </button>
-              <button
-                onClick={() => setTool('circle')}
-                className={`p-1.5 rounded-lg transition-all ${
-                  tool === 'circle' ? 'bg-brand-orange text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Spotlight Circle"
-              >
-                <Circle className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Color Palette */}
-            <div className="flex items-center gap-1.5">
-              {[
-                { hex: '#facc15', label: 'Neon Yellow' },
-                { hex: '#ef4444', label: 'Red' },
-                { hex: '#06b6d4', label: 'Cyan' },
-                { hex: '#ffffff', label: 'White' }
-              ].map(c => (
+              {film && (
                 <button
-                  key={c.hex}
-                  onClick={() => setColor(c.hex)}
-                  style={{ backgroundColor: c.hex }}
-                  className={`w-5 h-5 rounded-full transition-transform ${
-                    color === c.hex ? 'scale-125 ring-2 ring-white' : 'opacity-80 hover:opacity-100'
-                  }`}
-                  title={c.label}
-                />
-              ))}
-            </div>
-
-            {/* Video Transport Controls */}
-            <div className="flex items-center gap-1 bg-brand-card p-1 rounded-xl border border-brand-border">
-              <button
-                onClick={() => stepFrame(-0.1)}
-                className="px-2 py-1 text-slate-300 hover:text-white font-mono text-[11px]"
-                title="Step back 1 frame"
-              >
-                -1f
-              </button>
-
-              <button
-                onClick={togglePlay}
-                className="p-1.5 bg-brand-orange hover:bg-brand-orangeHover text-white rounded-lg"
-              >
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              </button>
-
-              <button
-                onClick={() => stepFrame(0.1)}
-                className="px-2 py-1 text-slate-300 hover:text-white font-mono text-[11px]"
-                title="Step forward 1 frame"
-              >
-                +1f
-              </button>
-            </div>
-
-            {/* Record Voice Note Button */}
-            <button
-              onClick={toggleVoiceRecording}
-              className={`px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
-                isRecordingVoice
-                  ? 'bg-red-600 text-white animate-pulse'
-                  : 'bg-brand-card border border-brand-border text-slate-200 hover:border-brand-orange hover:text-white'
-              }`}
-            >
-              {isRecordingVoice ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-brand-orange" />}
-              {isRecordingVoice ? 'Stop Recording' : 'Record Voice Memo'}
-            </button>
-          </div>
-        </div>
-
-        {/* Timestamped Coaching Feedback Feed */}
-        <div className="bg-brand-card border border-brand-border rounded-2xl p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-brand-border mb-3">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-brand-orange" />
-                <h3 className="text-sm font-bold text-white">Coaching Breakdown</h3>
-              </div>
-              <span className="text-[10px] text-slate-400">Click to Jump</span>
-            </div>
-
-            {/* List of Timestamped Notes & Voice Memos */}
-            <div className="space-y-2.5 max-h-72 sm:max-h-96 overflow-y-auto pr-1 text-xs">
-              {notes.map((note, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => seekTo(note.timestamp)}
-                  className="bg-brand-surface hover:bg-brand-border/40 border border-brand-border/70 rounded-xl p-3 cursor-pointer transition-all group"
+                  onClick={deleteFilm}
+                  aria-label="Delete this film review"
+                  className="min-h-[40px] min-w-[40px] text-xs bg-brand-surface border border-brand-border hover:border-red-500/40 text-slate-400 hover:text-red-400 px-2.5 rounded-xl flex items-center justify-center"
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono text-brand-orange font-bold text-[11px] group-hover:underline flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatSecs(note.timestamp)}
-                    </span>
-                    <span className="text-[10px] text-slate-400">{note.author}</span>
-                  </div>
-                  <p className="text-slate-200 leading-relaxed">{note.text}</p>
-                </div>
-              ))}
-
-              {/* Recorded Voice Memos */}
-              {voiceNotes.map(vn => (
-                <div
-                  key={vn.id}
-                  onClick={() => seekTo(vn.timestamp)}
-                  className="bg-brand-orange/10 border border-brand-orange/30 rounded-xl p-3 cursor-pointer transition-all flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-2 text-brand-orange font-medium">
-                    <Volume2 className="w-4 h-4" />
-                    <span>Voice Memo ({vn.duration}s)</span>
-                  </div>
-                  <span className="font-mono text-[10px] text-slate-400">at {formatSecs(vn.timestamp)}</span>
-                </div>
-              ))}
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
-          </div>
-
-          {/* Add Timestamp Note Form */}
-          <form onSubmit={handleAddNote} className="mt-4 pt-3 border-t border-brand-border space-y-2">
-            <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span>Timestamp cue:</span>
-              <span className="font-mono text-brand-orange font-bold">{formatSecs(currentTime)}</span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Drop teaching note at this frame..."
-                value={newNoteText}
-                onChange={(e) => setNewNoteText(e.target.value)}
-                className="flex-1 bg-brand-surface border border-brand-border rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-brand-orange"
-              />
-              <button
-                type="submit"
-                className="bg-brand-orange hover:bg-brand-orangeHover text-white p-2 rounded-xl transition-all"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-          </form>
+          )}
         </div>
       </div>
+
+      {mediaError && (
+        <div className="bg-brand-orange/10 border border-brand-orange/30 rounded-xl px-4 py-3 text-xs text-orange-200 flex items-start gap-2" role="alert">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {mediaError}
+        </div>
+      )}
+
+      {!film ? (
+        <div className="bg-brand-card border border-dashed border-brand-border rounded-2xl p-8 text-center text-sm text-slate-400">
+          {isCoach ? `No film for ${athlete.name} yet. Use “Load film” to pick a clip from this device.` : 'Coach has not shared any film with you yet.'}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-brand-card border border-brand-border rounded-2xl overflow-hidden flex flex-col">
+            <div ref={boxRef} className="relative aspect-video bg-black select-none">
+              <video
+                ref={videoRef}
+                src={videoSrc}
+                onTimeUpdate={e => setCurrentTime(e.currentTarget.currentTime)}
+                onSeeked={e => setCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+                onError={() => videoSrc && setVideoError('This video could not load. Check the connection, or load a clip from this device.')}
+                className="absolute inset-0 w-full h-full object-contain"
+                playsInline
+                preload="metadata"
+              />
+              <canvas
+                ref={canvasRef}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                aria-label={isCoach ? 'Drawing layer. Draw with a finger, pen or mouse.' : 'Coach drawings'}
+                className={`absolute inset-0 w-full h-full z-10 ${isCoach ? 'cursor-crosshair touch-none' : 'pointer-events-none'}`}
+              />
+              <div className="absolute top-2 right-2 z-20 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-mono text-brand-orange border border-white/10 pointer-events-none">
+                {formatSecs(currentTime)} / {formatSecs(duration)}
+              </div>
+              {visibleFrame && (
+                <div className="absolute top-10 right-2 z-20 bg-black/70 px-2 py-1 rounded-lg text-[10px] text-white border border-white/10 pointer-events-none">
+                  {visibleFrame.strokes.length} drawing{visibleFrame.strokes.length === 1 ? '' : 's'} on this frame
+                </div>
+              )}
+              {videoError && (
+                <div className="absolute inset-x-0 bottom-0 z-20 bg-black/80 text-xs text-orange-200 px-3 py-2" role="alert">
+                  {videoError}
+                </div>
+              )}
+            </div>
+
+            {film.videoUrl && (
+              <p className="px-3 py-2 text-[11px] text-slate-500 border-t border-brand-border">
+                Sample animated play for practising the tools. {isCoach && 'Use “Load film” to try it on real game film.'}
+              </p>
+            )}
+
+            <div className="p-3 bg-brand-surface border-t border-brand-border flex flex-wrap items-center justify-between gap-3 text-xs">
+              {isCoach && (
+                <div className="flex items-center gap-1 bg-brand-card p-1 rounded-xl border border-brand-border" role="group" aria-label="Drawing tool">
+                  {([
+                    ['pen', 'Pen', <PenTool key="p" className="w-4 h-4" />],
+                    ['arrow', 'Arrow', <MoveRight key="a" className="w-4 h-4" />],
+                    ['circle', 'Spotlight circle', <Circle key="c" className="w-4 h-4" />]
+                  ] as const).map(([key, label, icon]) => (
+                    <button
+                      key={key}
+                      onClick={() => setTool(key)}
+                      aria-pressed={tool === key}
+                      aria-label={label}
+                      title={label}
+                      className={`min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg transition-all ${
+                        tool === key ? 'bg-brand-orange text-white' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => updateFilm(film.id, f => ({ ...f, drawings: undoStroke(f.drawings, currentTime) }))}
+                    disabled={!visibleFrame}
+                    aria-label="Undo last drawing on this frame"
+                    title="Undo"
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white disabled:opacity-30"
+                  >
+                    <Undo2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => updateFilm(film.id, f => ({ ...f, drawings: clearFrame(f.drawings, currentTime) }))}
+                    disabled={!visibleFrame}
+                    aria-label="Clear drawings on this frame"
+                    title="Clear this frame"
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 disabled:opacity-30"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {isCoach && (
+                <div className="flex items-center gap-2" role="group" aria-label="Drawing colour">
+                  {COLORS.map(c => (
+                    <button
+                      key={c.hex}
+                      onClick={() => setColor(c.hex)}
+                      aria-pressed={color === c.hex}
+                      aria-label={c.label}
+                      title={c.label}
+                      className="w-9 h-9 flex items-center justify-center rounded-full"
+                    >
+                      <span
+                        style={{ backgroundColor: c.hex }}
+                        className={`w-6 h-6 rounded-full transition-transform ${color === c.hex ? 'scale-110 ring-2 ring-white ring-offset-2 ring-offset-brand-surface' : 'opacity-80'}`}
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-1 bg-brand-card p-1 rounded-xl border border-brand-border" role="group" aria-label="Playback">
+                <button onClick={() => stepFrame(-1)} className="min-h-[40px] px-2.5 text-slate-300 hover:text-white font-mono text-[11px]" aria-label="Back one frame" title="Back one frame">
+                  −1 frame
+                </button>
+                <button
+                  onClick={togglePlay}
+                  disabled={!videoSrc}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  className="min-w-[44px] min-h-[40px] flex items-center justify-center bg-brand-orange hover:bg-brand-orangeHover text-white rounded-lg disabled:opacity-40"
+                >
+                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                </button>
+                <button onClick={() => stepFrame(1)} className="min-h-[40px] px-2.5 text-slate-300 hover:text-white font-mono text-[11px]" aria-label="Forward one frame" title="Forward one frame">
+                  +1 frame
+                </button>
+              </div>
+
+              {isCoach && (
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+                    isRecording ? 'bg-red-600 text-white animate-pulse' : 'bg-brand-card border border-brand-border text-slate-200 hover:border-brand-orange hover:text-white'
+                  }`}
+                >
+                  {isRecording ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-brand-orange" />}
+                  {isRecording ? `Stop (${recordedSeconds}s / ${MAX_MEMO_SECONDS}s)` : 'Record voice memo'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-brand-card border border-brand-border rounded-2xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-3 border-b border-brand-border mb-3">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-brand-orange" />
+                  <h3 className="text-sm font-bold text-white">Breakdown</h3>
+                </div>
+                <span className="text-[10px] text-slate-400">Tap to jump</span>
+              </div>
+
+              <div className="space-y-2.5 max-h-80 sm:max-h-96 overflow-y-auto pr-1 text-xs">
+                {feed.length === 0 && <p className="text-slate-400">{isCoach ? 'Pause anywhere, then draw, type a note, or record a memo.' : 'No notes yet.'}</p>}
+                {feed.map(item => (
+                  <div
+                    key={item.id}
+                    className={`rounded-xl border p-3 flex items-start gap-2 ${
+                      item.kind === 'memo' ? 'bg-brand-orange/10 border-brand-orange/30' : item.kind === 'drawing' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-brand-surface border-brand-border/70'
+                    }`}
+                  >
+                    <button onClick={() => (item.kind === 'memo' ? (playingMemo === item.id ? stopMemo() : playMemo(item.id, item.mediaKey, item.t)) : seekTo(item.t))} className="flex-1 text-left min-w-0">
+                      <span className="flex items-center justify-between mb-1">
+                        <span className="font-mono text-brand-orange font-bold text-[11px] flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {formatSecs(item.t)}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {item.kind === 'note' ? item.author : item.kind === 'memo' ? `Voice memo · ${item.duration}s` : 'Drawing'}
+                        </span>
+                      </span>
+                      {item.kind === 'note' && <span className="block text-slate-200 leading-relaxed break-words">{item.text}</span>}
+                      {item.kind === 'memo' && (
+                        <span className="flex items-center gap-1.5 text-brand-orange font-medium">
+                          {playingMemo === item.id ? <StopCircle className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                          {playingMemo === item.id ? 'Playing… tap to stop' : 'Tap to play'}
+                        </span>
+                      )}
+                      {item.kind === 'drawing' && (
+                        <span className="flex items-center gap-1.5 text-sky-300">
+                          <Pencil className="w-3.5 h-3.5" /> {item.count} mark{item.count === 1 ? '' : 's'} on this frame
+                        </span>
+                      )}
+                    </button>
+                    {isCoach && item.kind !== 'drawing' && (
+                      <button
+                        onClick={() => (item.kind === 'memo' ? deleteMemo(item.id, item.mediaKey) : deleteNote(item.id))}
+                        aria-label={item.kind === 'memo' ? 'Delete voice memo' : 'Delete note'}
+                        className="text-slate-500 hover:text-red-400 p-1.5 -m-1 rounded"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {isCoach && (
+              <form onSubmit={handleAddNote} className="mt-4 pt-3 border-t border-brand-border space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Note at</span>
+                  <span className="font-mono text-brand-orange font-bold">{formatSecs(currentTime)}</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    maxLength={500}
+                    placeholder="Teaching note for this moment…"
+                    value={newNoteText}
+                    onChange={e => setNewNoteText(e.target.value)}
+                    aria-label="New note"
+                    className="flex-1 min-w-0 bg-brand-surface border border-brand-border rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-orange"
+                  />
+                  <button type="submit" aria-label="Add note" className="bg-brand-orange hover:bg-brand-orangeHover text-white min-w-[44px] rounded-xl flex items-center justify-center">
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

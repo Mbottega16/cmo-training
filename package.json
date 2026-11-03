@@ -1,12 +1,14 @@
 {
-  "name": "app",
+  "name": "cmo-training",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:phone": "vite --host",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
