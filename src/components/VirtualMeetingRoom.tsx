@@ -178,7 +178,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
           {!inCall ? (
             <button
               onClick={startMeeting}
-              className="min-h-[44px] text-xs font-semibold bg-brand-orange hover:bg-brand-orangeHover text-white px-4 py-2 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-brand-orange/20"
+              className="min-h-[44px] text-xs font-semibold bg-brand-action hover:bg-brand-actionHover text-white px-4 py-2 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-brand-orange/20"
             >
               <Radio className="w-4 h-4" />
               {mode === 'coach' ? 'Open the room' : 'Join the room'}
@@ -249,7 +249,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                 onClick={toggleMic}
                 aria-pressed={isMuted}
                 aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border transition-all disabled:opacity-40 ${
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border transition disabled:opacity-40 ${
                   isMuted ? 'bg-red-500/20 border-red-500/40 text-red-400' : 'bg-brand-card border-brand-border text-slate-200 hover:text-white'
                 }`}
               >
@@ -260,7 +260,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                 onClick={toggleVideo}
                 aria-pressed={isVideoOff}
                 aria-label={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
-                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border transition-all disabled:opacity-40 ${
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl border transition disabled:opacity-40 ${
                   isVideoOff ? 'bg-red-500/20 border-red-500/40 text-red-400' : 'bg-brand-card border-brand-border text-slate-200 hover:text-white'
                 }`}
               >
@@ -283,7 +283,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                 </div>
                 <span className="text-[10px] text-slate-400">Saved to {athlete.name.split(' ')[0]}'s file</span>
               </div>
-              <div className="space-y-2 max-h-64 sm:max-h-80 overflow-y-auto pr-1 text-xs">
+              <div className="space-y-2 max-h-64 sm:max-h-80 overflow-y-auto overscroll-contain pr-1 text-xs">
                 {coachNotes.length === 0 && <p className="text-slate-400">No notes yet.</p>}
                 {coachNotes.map((note, index) => (
                   <div key={note.id} className="bg-brand-surface border border-brand-border/70 rounded-xl p-2.5 text-slate-200">
@@ -306,7 +306,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                 aria-label="New coaching note"
                 className="flex-1 min-w-0 bg-brand-surface border border-brand-border rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-orange"
               />
-              <button type="submit" aria-label="Save note" className="bg-brand-orange hover:bg-brand-orangeHover text-white min-w-[44px] rounded-xl flex items-center justify-center">
+              <button type="submit" aria-label="Save note" className="bg-brand-action hover:bg-brand-actionHover text-white min-w-[44px] rounded-xl flex items-center justify-center">
                 <Send className="w-4 h-4" />
               </button>
             </form>
@@ -322,7 +322,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
             ) : (
               <p className="text-slate-400">None booked. Book one from your portal.</p>
             )}
-            <p className="text-slate-500 pt-2">Tip: set your phone sideways on a stand so Coach can see your full body and footwork.</p>
+            <p className="text-slate-400 pt-2">Tip: set your phone sideways on a stand so Coach can see your full body and footwork.</p>
           </div>
         )}
       </div>

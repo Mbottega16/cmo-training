@@ -45,6 +45,9 @@ Mobile-first installable web app (PWA) for CMO Training, a basketball skills tra
 - `node_modules/`, `dist/`, `.git/`, `public/samples/*.mp4`, `public/icons/*.png`.
 
 ## Rules & Gotchas
+- UI work follows the Web Interface Guidelines (github.com/vercel-labs/web-interface-guidelines) plus the owner's house rules (vault skill `web-bible`).
+- White text only on `brand-action` / `brand-success` / `brand-info` (≥5:1). `brand-orange` is for accents and text on dark; it fails behind white text (3.1:1).
+- Tabs are real `<a href>` links; the coach's chosen athlete is in the URL (`#/coach/<tab>/<athleteId>`). Phone form fields are forced to 16px (iOS zoom).
 - Rules live in `logic.ts` only; components call them. Add a test for any rule change and check it can fail.
 - Everything is client-side, so any athlete can edit their own credits in DevTools. Fine for a demo; the backend must re-run these rules on the server.
 - Drawings are stored as 0..1 coordinates per frame (±0.15 s) and only show while paused.
@@ -54,5 +57,5 @@ Mobile-first installable web app (PWA) for CMO Training, a basketball skills tra
 
 ## Session Handoff (Last Worked On · Current State · Next Up)
 - **Last Worked On (2026-11-03):** v0.3 hardening (see HISTORY). Before that, v0.2. Fixed all 15 audit bugs, made the fake parts real where possible without a server (bookings, cancels with live countdowns, XP, voice memos, drawings on frames, per-athlete views, saving, invite links), added install-to-home-screen + offline, CSP, our own sample clip (the old Google sample URL returns 403), launchers, and rule tests.
-- **Current State:** `npm test` 16/16, build clean, 50/50 browser checks in Chrome (phone/laptop/desktop) with 0 console errors, 11/11 in WebKit. Not hosted anywhere yet. Remaining issues all need a server or the owner (see vault context.md).
+- **Current State:** `npm test` 16/16, build clean, 56/56 browser checks in Chrome (phone/laptop/desktop) with 0 console errors, 11/11 in WebKit, axe-core 0 WCAG 2.2 AA violations on 14 screen/size combinations. Not hosted anywhere yet. Remaining issues all need a server or the owner (see vault context.md).
 - **Next Up:** Show the coach and collect notes. Then decide the backend (accounts, database, Stripe, messaging, video service) — all need the owner's sign-off on cost. Hosting on GitHub Pages needs a yes too.

@@ -115,7 +115,7 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => act(waiveLateCancel, b.id, 'good')}
-                  className="min-h-[44px] text-xs font-semibold bg-brand-green hover:bg-green-600 text-white py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5"
+                  className="min-h-[44px] text-xs font-semibold bg-brand-success hover:bg-green-800 text-white py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5"
                 >
                   <HeartHandshake className="w-4 h-4" /> Waive & excuse
                 </button>

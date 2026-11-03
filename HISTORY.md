@@ -7,6 +7,7 @@
 - Check-in only opens 30 min before a session (until 12 h after); late-cancelled spots stay locked unless waived (matches "late cancellations lock court time").
 - Offline: the service worker caches the sample clip and answers video range requests from cache. Fonts self-hosted (Fontsource), no requests to other sites; CSP is `'self'` only. Fonts were briefly inlined as data: URLs and blocked by the CSP; fixed with `assetsInlineLimit: 0`.
 - Clickjacking guard (refuses to run framed), persistent-storage request, iPhone "Add to Home Screen" hint. `npm run phone` serves the built app, not the dev server, to Wi-Fi.
+- Web-bible review (Vercel Web Interface Guidelines + axe-core): button contrast fixed (white text moved off bright orange/green/blue onto 5:1 shades), small grey text lightened, 44 px tap targets, 16 px phone inputs, tabs are real links, athlete in the URL, per-screen titles, one h1, skip link, `color-scheme: dark`, no `transition: all`, confirm before deleting notes/memos, frame-step buttons announce their visible text. axe: 0 violations.
 - Safari engine: storing files in IndexedDB fails in private mode; media now falls back to raw bytes. Found by a new WebKit test (11/11). Chrome 50/50. 16 rule tests; three new mutations each caught.
 
 ## 2026-11-03 — v0.2: audit fixes, real demo behaviour, installable

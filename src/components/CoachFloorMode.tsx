@@ -147,7 +147,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
           return (
             <div
               key={booking.id}
-              className={`bg-brand-card border rounded-2xl p-4 transition-all ${
+              className={`bg-brand-card border rounded-2xl p-4 transition ${
                 status === 'present' ? 'border-brand-green/50 bg-brand-green/5' : status === 'absent' ? 'border-red-500/50 bg-red-500/5' : 'border-brand-border'
               }`}
             >
@@ -171,9 +171,9 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
                     onClick={() => update(s => setAttendance(s, booking.id, status === 'present' ? 'pending' : 'present', new Date()))}
                     disabled={!checkInOpen}
                     aria-pressed={status === 'present'}
-                    className={`flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed ${
                       status === 'present'
-                        ? 'bg-brand-green text-white shadow-lg shadow-brand-green/20'
+                        ? 'bg-brand-success text-white shadow-lg shadow-brand-green/20'
                         : 'bg-brand-surface border border-brand-border hover:border-brand-green/60 text-slate-200'
                     }`}
                   >
@@ -187,7 +187,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
                     aria-pressed={status === 'absent'}
                     aria-label={status === 'absent' ? `Undo no-show for ${player.name}` : `Mark ${player.name} as a no-show`}
                     title="No-show"
-                    className={`min-h-[48px] min-w-[48px] px-3 rounded-xl text-sm font-bold flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`min-h-[48px] min-w-[48px] px-3 rounded-xl text-sm font-bold flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${
                       status === 'absent' ? 'bg-red-600 text-white' : 'bg-brand-surface border border-brand-border text-slate-400 hover:text-red-400'
                     }`}
                   >
@@ -197,7 +197,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
 
                   <button
                     onClick={() => setAssignTo(player)}
-                    className="flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-200 hover:text-white flex items-center justify-center gap-2 transition-all"
+                    className="flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-200 hover:text-white flex items-center justify-center gap-2 transition"
                   >
                     <Dumbbell className="w-4 h-4 text-brand-orange" />
                     Assign drill
@@ -281,7 +281,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
               </button>
               <button
                 type="submit"
-                className="flex-1 py-3 rounded-xl bg-brand-orange hover:bg-brand-orangeHover text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-orange/20"
+                className="flex-1 py-3 rounded-xl bg-brand-action hover:bg-brand-actionHover text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-orange/20"
               >
                 <Send className="w-4 h-4" />
                 Assign drill

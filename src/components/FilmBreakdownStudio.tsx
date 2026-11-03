@@ -363,13 +363,16 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
   };
 
   const deleteMemo = (id: string, mediaKey: string) => {
-    if (!film) return;
+    if (!film || !window.confirm('Delete this voice memo?')) return;
     if (playingMemo === id) stopMemo();
     void deleteMedia(mediaKey).catch(() => undefined);
     updateFilm(film.id, f => ({ ...f, voiceNotes: f.voiceNotes.filter(v => v.id !== id) }));
   };
 
-  const deleteNote = (id: string) => film && updateFilm(film.id, f => ({ ...f, notes: f.notes.filter(n => n.id !== id) }));
+  const deleteNote = (id: string) => {
+    if (!film || !window.confirm('Delete this note?')) return;
+    void updateFilm(film.id, f => ({ ...f, notes: f.notes.filter(n => n.id !== id) }));
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -443,7 +446,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
               <select
                 value={film?.id}
                 onChange={e => setSelectedFilmId(e.target.value)}
-                className="bg-brand-surface border border-brand-border rounded-xl px-3 py-2 text-sm text-white min-h-[40px] max-w-[14rem]"
+                className="bg-brand-surface border border-brand-border rounded-xl px-3 py-2 text-sm text-white min-h-[44px] max-w-[14rem]"
               >
                 {films.map(f => (
                   <option key={f.id} value={f.id}>
@@ -459,7 +462,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={uploading}
-                className="min-h-[40px] text-xs bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
+                className="min-h-[44px] text-xs bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Upload className="w-3.5 h-3.5" /> {uploading ? 'Saving…' : 'Load film'}
               </button>
@@ -467,7 +470,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                 <button
                   onClick={deleteFilm}
                   aria-label="Delete this film review"
-                  className="min-h-[40px] min-w-[40px] text-xs bg-brand-surface border border-brand-border hover:border-red-500/40 text-slate-400 hover:text-red-400 px-2.5 rounded-xl flex items-center justify-center"
+                  className="min-h-[44px] min-w-[44px] text-xs bg-brand-surface border border-brand-border hover:border-red-500/40 text-slate-400 hover:text-red-400 px-2.5 rounded-xl flex items-center justify-center"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -530,7 +533,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
             </div>
 
             {film.videoUrl && (
-              <p className="px-3 py-2 text-[11px] text-slate-500 border-t border-brand-border">
+              <p className="px-3 py-2 text-[11px] text-slate-400 border-t border-brand-border">
                 Sample animated play for practising the tools. {isCoach && 'Use “Load film” to try it on real game film.'}
               </p>
             )}
@@ -549,8 +552,8 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                       aria-pressed={tool === key}
                       aria-label={label}
                       title={label}
-                      className={`min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg transition-all ${
-                        tool === key ? 'bg-brand-orange text-white' : 'text-slate-400 hover:text-white'
+                      className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg transition ${
+                        tool === key ? 'bg-brand-action text-white' : 'text-slate-400 hover:text-white'
                       }`}
                     >
                       {icon}
@@ -561,7 +564,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                     disabled={!visibleFrame}
                     aria-label="Undo last drawing on this frame"
                     title="Undo"
-                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white disabled:opacity-30"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white disabled:opacity-30"
                   >
                     <Undo2 className="w-4 h-4" />
                   </button>
@@ -570,7 +573,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                     disabled={!visibleFrame}
                     aria-label="Clear drawings on this frame"
                     title="Clear this frame"
-                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 disabled:opacity-30"
+                    className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 disabled:opacity-30"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -586,7 +589,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                       aria-pressed={color === c.hex}
                       aria-label={c.label}
                       title={c.label}
-                      className="w-9 h-9 flex items-center justify-center rounded-full"
+                      className="w-11 h-11 flex items-center justify-center rounded-full"
                     >
                       <span
                         style={{ backgroundColor: c.hex }}
@@ -598,18 +601,18 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
               )}
 
               <div className="flex items-center gap-1 bg-brand-card p-1 rounded-xl border border-brand-border" role="group" aria-label="Playback">
-                <button onClick={() => stepFrame(-1)} className="min-h-[40px] px-2.5 text-slate-300 hover:text-white font-mono text-[11px]" aria-label="Back one frame" title="Back one frame">
+                <button onClick={() => stepFrame(-1)} className="min-h-[44px] px-2.5 text-slate-300 hover:text-white font-mono text-[11px]" title="Back one frame">
                   −1 frame
                 </button>
                 <button
                   onClick={togglePlay}
                   disabled={!videoSrc}
                   aria-label={isPlaying ? 'Pause' : 'Play'}
-                  className="min-w-[44px] min-h-[40px] flex items-center justify-center bg-brand-orange hover:bg-brand-orangeHover text-white rounded-lg disabled:opacity-40"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center bg-brand-action hover:bg-brand-actionHover text-white rounded-lg disabled:opacity-40"
                 >
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </button>
-                <button onClick={() => stepFrame(1)} className="min-h-[40px] px-2.5 text-slate-300 hover:text-white font-mono text-[11px]" aria-label="Forward one frame" title="Forward one frame">
+                <button onClick={() => stepFrame(1)} className="min-h-[44px] px-2.5 text-slate-300 hover:text-white font-mono text-[11px]" title="Forward one frame">
                   +1 frame
                 </button>
               </div>
@@ -617,7 +620,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
               {isCoach && (
                 <button
                   onClick={isRecording ? stopRecording : startRecording}
-                  className={`min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition-all ${
+                  className={`min-h-[44px] px-3 py-2 rounded-xl font-semibold flex items-center gap-1.5 transition ${
                     isRecording ? 'bg-red-600 text-white animate-pulse' : 'bg-brand-card border border-brand-border text-slate-200 hover:border-brand-orange hover:text-white'
                   }`}
                 >
@@ -638,7 +641,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                 <span className="text-[10px] text-slate-400">Tap to jump</span>
               </div>
 
-              <div className="space-y-2.5 max-h-80 sm:max-h-96 overflow-y-auto pr-1 text-xs">
+              <div className="space-y-2.5 max-h-80 sm:max-h-96 overflow-y-auto overscroll-contain pr-1 text-xs">
                 {feed.length === 0 && <p className="text-slate-400">{isCoach ? 'Pause anywhere, then draw, type a note, or record a memo.' : 'No notes yet.'}</p>}
                 {feed.map(item => (
                   <div
@@ -674,7 +677,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                       <button
                         onClick={() => (item.kind === 'memo' ? deleteMemo(item.id, item.mediaKey) : deleteNote(item.id))}
                         aria-label={item.kind === 'memo' ? 'Delete voice memo' : 'Delete note'}
-                        className="text-slate-500 hover:text-red-400 p-1.5 -m-1 rounded"
+                        className="min-w-[44px] min-h-[44px] -m-2 flex items-center justify-center rounded text-slate-400 hover:text-red-400"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -700,7 +703,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                     aria-label="New note"
                     className="flex-1 min-w-0 bg-brand-surface border border-brand-border rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-orange"
                   />
-                  <button type="submit" aria-label="Add note" className="bg-brand-orange hover:bg-brand-orangeHover text-white min-w-[44px] rounded-xl flex items-center justify-center">
+                  <button type="submit" aria-label="Add note" className="bg-brand-action hover:bg-brand-actionHover text-white min-w-[44px] rounded-xl flex items-center justify-center">
                     <Plus className="w-4 h-4" />
                   </button>
                 </div>

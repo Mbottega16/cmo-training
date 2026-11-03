@@ -119,7 +119,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
 
           <button
             onClick={() => setBookingOpen(true)}
-            className="w-full sm:w-auto min-h-[48px] px-5 py-3 rounded-xl bg-brand-orange hover:bg-brand-orangeHover text-white text-sm font-bold transition-all shadow-lg shadow-brand-orange/20 flex items-center justify-center gap-2"
+            className="w-full sm:w-auto min-h-[48px] px-5 py-3 rounded-xl bg-brand-action hover:bg-brand-actionHover text-white text-sm font-bold transition shadow-lg shadow-brand-orange/20 flex items-center justify-center gap-2"
           >
             <CreditCard className="w-4 h-4" />
             Book a session
@@ -178,10 +178,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                           </p>
                           <p className="text-slate-400">Injury or emergency? Contact Coach:</p>
                           <div className="flex gap-2">
-                            <a href={`sms:${COACH.phone}`} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-brand-card border border-brand-border text-slate-200 min-h-[40px]">
+                            <a href={`sms:${COACH.phone}`} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-brand-card border border-brand-border text-slate-200 min-h-[44px]">
                               <MessageSquare className="w-3.5 h-3.5" /> Text
                             </a>
-                            <a href={`tel:${COACH.phone}`} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-brand-card border border-brand-border text-slate-200 min-h-[40px]">
+                            <a href={`tel:${COACH.phone}`} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-brand-card border border-brand-border text-slate-200 min-h-[44px]">
                               <Phone className="w-3.5 h-3.5" /> Call
                             </a>
                           </div>
@@ -194,7 +194,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                         {session.type === 'virtual_live' && (
                           <button
                             onClick={() => navigate({ role: 'player', athleteId: player.id, tab: 'room' })}
-                            className="flex-1 sm:flex-initial min-h-[44px] px-3.5 py-2 rounded-xl bg-brand-accent hover:bg-blue-600 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
+                            className="flex-1 sm:flex-initial min-h-[44px] px-3.5 py-2 rounded-xl bg-brand-info hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
                           >
                             <Video className="w-3.5 h-3.5" /> Join room
                           </button>
@@ -229,7 +229,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                 <button
                   key={f.id}
                   onClick={() => navigate({ role: 'player', athleteId: player.id, tab: 'film' })}
-                  className="w-full text-left bg-brand-surface hover:bg-brand-border/40 border border-brand-border rounded-xl p-4 transition-all flex items-center justify-between gap-3 group"
+                  className="w-full text-left bg-brand-surface hover:bg-brand-border/40 border border-brand-border rounded-xl p-4 transition flex items-center justify-between gap-3 group"
                 >
                   <div className="min-w-0">
                     <h4 className="text-sm font-semibold text-white group-hover:text-brand-orange transition-colors truncate">{f.title}</h4>
@@ -263,7 +263,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                   role="checkbox"
                   aria-checked={item.completed}
                   onClick={() => update(s => toggleHomework(s, item.id))}
-                  className={`w-full text-left p-3 rounded-xl border transition-all ${
+                  className={`w-full text-left p-3 rounded-xl border transition ${
                     item.completed ? 'bg-brand-green/10 border-brand-green/30 text-slate-400' : 'bg-brand-surface border-brand-border text-white hover:border-slate-500'
                   }`}
                 >
@@ -277,7 +277,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                         {item.category} · {item.repsOrMinutes}
                       </span>
                       {item.notes && <span className="block text-[11px] text-slate-400 mt-1 italic">“{item.notes}”</span>}
-                      <span className="block text-[10px] text-slate-500 mt-1">Assigned {formatAgo(item.assignedAt, now)}</span>
+                      <span className="block text-[10px] text-slate-400 mt-1">Assigned {formatAgo(item.assignedAt, now)}</span>
                     </span>
                   </span>
                 </button>
@@ -313,7 +313,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                     role="radio"
                     aria-checked={pickedSession === s.id}
                     onClick={() => setPickedSession(s.id)}
-                    className={`w-full text-left p-3 rounded-xl border transition-all ${
+                    className={`w-full text-left p-3 rounded-xl border transition ${
                       pickedSession === s.id ? 'border-brand-orange bg-brand-orange/10' : 'border-brand-border bg-brand-surface hover:border-slate-500'
                     }`}
                   >
@@ -340,13 +340,13 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
             <button
               disabled={!picked || player.creditsRemaining < 1}
               onClick={confirmBooking}
-              className="w-full min-h-[48px] py-3 rounded-xl bg-brand-orange hover:bg-brand-orangeHover disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition-all"
+              className="w-full min-h-[48px] py-3 rounded-xl bg-brand-action hover:bg-brand-actionHover disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition"
             >
               {player.creditsRemaining < 1 ? 'No credits left' : picked ? 'Book with 1 credit' : 'Pick a session'}
             </button>
             <button
               disabled
-              className="w-full min-h-[44px] py-2.5 rounded-xl border border-brand-border text-slate-500 cursor-not-allowed"
+              className="w-full min-h-[44px] py-2.5 rounded-xl border border-brand-border text-slate-400 cursor-not-allowed"
               title="Card payments need the Stripe connection"
             >
               Pay by card: not connected in the demo

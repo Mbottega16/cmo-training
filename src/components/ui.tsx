@@ -77,7 +77,7 @@ export const Modal: React.FC<{ title: string; subtitle?: React.ReactNode; onClos
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-brand-card border border-brand-border rounded-t-2xl sm:rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none"
+        className="bg-brand-card border border-brand-border rounded-t-2xl sm:rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto overscroll-contain pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none"
       >
         <div className="flex items-start justify-between gap-3 pb-3 border-b border-brand-border">
           <div>
@@ -86,7 +86,7 @@ export const Modal: React.FC<{ title: string; subtitle?: React.ReactNode; onClos
             </h3>
             {subtitle && <div className="text-xs text-slate-400 mt-0.5">{subtitle}</div>}
           </div>
-          <button data-close onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-white p-2 -m-2 rounded-lg">
+          <button data-close onClick={onClose} aria-label="Close" className="min-w-[44px] min-h-[44px] -m-2 flex items-center justify-center text-slate-400 hover:text-white rounded-lg">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -128,7 +128,7 @@ export const Switch: React.FC<{ checked: boolean; onChange: () => void; label: s
     role="switch"
     aria-checked={checked}
     onClick={onChange}
-    className="w-full text-left bg-brand-surface border border-brand-border rounded-xl p-3 flex items-center justify-between gap-3 hover:border-slate-500 transition-all min-h-[44px]"
+    className="w-full text-left bg-brand-surface border border-brand-border rounded-xl p-3 flex items-center justify-between gap-3 hover:border-slate-500 transition min-h-[44px]"
   >
     <span>
       <span className="block font-semibold text-white">{label}</span>
@@ -151,7 +151,7 @@ export const AthletePicker: React.FC<{ players: Player[]; value: string; onChang
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className="bg-brand-surface border border-brand-border rounded-xl px-3 py-2 text-sm font-medium text-white focus:outline-none focus:border-brand-orange min-h-[40px]"
+      className="bg-brand-surface border border-brand-border rounded-xl px-3 py-2 text-sm font-medium text-white focus:outline-none focus:border-brand-orange min-h-[44px]"
     >
       {players.map(p => (
         <option key={p.id} value={p.id}>

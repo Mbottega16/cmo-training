@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Info, RotateCcw } from 'lucide-react';
 import { useDemoStore } from './store';
 import { sessionPhase } from './logic';
-import { Navigation, type Route, type CoachTab, type AthleteTab } from './components/Navigation';
+import { Navigation, routeToHash, type Route, type CoachTab, type AthleteTab } from './components/Navigation';
 import { CoachFloorMode } from './components/CoachFloorMode';
 import { FilmBreakdownStudio } from './components/FilmBreakdownStudio';
 import { VirtualMeetingRoom } from './components/VirtualMeetingRoom';
@@ -20,14 +20,13 @@ function parseRoute(hash: string, playerIds: string[]): Route {
     return { role: 'player', athleteId: parts[1], tab };
   }
   if (parts[0] === 'coach' && COACH_TABS.includes(parts[1] as CoachTab)) {
-    return { role: 'coach', tab: parts[1] as CoachTab };
+    return { role: 'coach', tab: parts[1] as CoachTab, athleteId: playerIds.includes(parts[2] ?? '') ? parts[2] : undefined };
   }
   return { role: 'coach', tab: 'floor' };
 }
 
-export function routeToHash(route: Route): string {
-  return route.role === 'coach' ? `#/coach/${route.tab}` : `#/athlete/${route.athleteId}/${route.tab}`;
-}
+const COACH_TITLES: Record<CoachTab, string> = { floor: 'Floor Mode', film: 'Film Studio', room: 'Video Room', policy: 'Cancellations' };
+const ATHLETE_TITLES: Record<AthleteTab, string> = { portal: 'My Portal', film: 'Film from Coach', room: 'Video Room' };
 
 /** iPhone/iPad Safari not opened from the home screen: saved work there can be cleared after ~7 days unused. */
 function needsInstallHint(): boolean {
@@ -41,7 +40,6 @@ export const App: React.FC = () => {
   const { state } = store;
   const playerIds = state.players.map(p => p.id);
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash, playerIds));
-  const [coachAthleteId, setCoachAthleteId] = useState(state.players[0]?.id ?? '');
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute(window.location.hash, state.players.map(p => p.id)));
@@ -49,12 +47,24 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('hashchange', onHash);
   }, [state.players]);
 
-  const navigate = useCallback((next: Route) => {
+  const navigate = useCallback((next: Route, scroll = true) => {
     const hash = routeToHash(next);
     if (window.location.hash !== hash) window.location.hash = hash;
     setRoute(next);
-    window.scrollTo({ top: 0 });
+    if (scroll) window.scrollTo({ top: 0 });
   }, []);
+
+  // The coach's chosen athlete lives in the address, so links and reloads keep it.
+  const coachAthleteId = (route.role === 'coach' && route.athleteId) || state.players[0]?.id || '';
+  const setCoachAthleteId = (id: string) => route.role === 'coach' && navigate({ role: 'coach', tab: route.tab, athleteId: id }, false);
+
+  const pageTitle =
+    route.role === 'coach'
+      ? COACH_TITLES[route.tab]
+      : `${ATHLETE_TITLES[route.tab]}${route.tab === 'portal' ? ` · ${state.players.find(p => p.id === route.athleteId)?.name ?? ''}` : ''}`;
+  useEffect(() => {
+    document.title = `${pageTitle} · CMO Training`;
+  }, [pageTitle]);
 
   const handleReset = () => {
     if (window.confirm('Reset the demo? This clears every booking, note, drawing and voice memo saved in this browser.')) {
@@ -68,9 +78,20 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-brand-dark flex flex-col">
+      <a
+        href="#main"
+        onClick={e => {
+          e.preventDefault(); // the address holds the route, so don't let this link change it
+          document.getElementById('main')?.focus();
+        }}
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] bg-brand-action text-white px-4 py-2 rounded-lg"
+      >
+        Skip to content
+      </a>
       <Navigation route={route} navigate={navigate} players={state.players} pendingLateCancels={pendingLate} />
 
-      <main className="flex-1 max-w-6xl w-full mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+      <main id="main" tabIndex={-1} className="flex-1 max-w-6xl w-full mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6 outline-none">
+        <h1 className="sr-only">{pageTitle}</h1>
         <div className="bg-brand-surface/60 border border-brand-border/80 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-start gap-2.5">
             <Info className="w-4 h-4 text-brand-orange shrink-0 mt-0.5" />
@@ -82,7 +103,7 @@ export const App: React.FC = () => {
           </div>
           <button
             onClick={handleReset}
-            className="shrink-0 self-start sm:self-auto inline-flex items-center gap-1.5 bg-brand-card border border-brand-border hover:border-brand-orange px-3 py-2 rounded-lg text-slate-300 hover:text-white min-h-[40px]"
+            className="shrink-0 self-start sm:self-auto inline-flex items-center gap-1.5 bg-brand-card border border-brand-border hover:border-brand-orange px-3 py-2 rounded-lg text-slate-300 hover:text-white min-h-[44px]"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Reset demo
           </button>
@@ -121,7 +142,7 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="border-t border-brand-border/60 py-4 px-4 text-center text-xs text-slate-500 bg-brand-dark pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <footer className="border-t border-brand-border/60 py-4 px-4 text-center text-xs text-slate-400 bg-brand-dark pb-[max(1rem,env(safe-area-inset-bottom))]">
         CMO Training demo v0.3 · made-up data · built for review and feedback
       </footer>
     </div>
