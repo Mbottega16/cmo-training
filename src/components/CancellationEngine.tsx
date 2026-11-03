@@ -1,16 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { ShieldAlert, AlertTriangle, CheckCircle2, HeartHandshake, DollarSign, Clock, History } from 'lucide-react';
 import type { Booking } from '../types';
-import type { DemoStore } from '../store';
-import {
-  cancelBooking,
-  cancellationPreview,
-  enforceLateCancel,
-  GRACE_HOURS,
-  LATE_CANCEL_HOURS,
-  sessionPhase,
-  waiveLateCancel
-} from '../logic';
+import type { AppStore } from '../store';
+import { cancellationPreview, sessionPhase } from '../logic';
 import { formatAgo, formatCountdown, formatHours, formatSessionTime, useNow } from '../format';
 import { AthletePicker, Avatar, Toast, type ToastTone } from './ui';
 
@@ -22,8 +14,11 @@ const STATUS_TEXT: Record<Booking['status'], { label: string; tone: string }> = 
   forfeited: { label: 'Late cancel enforced · credit used', tone: 'text-red-400' }
 };
 
-export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) => {
-  const { state, run } = store;
+export const CancellationEngine: React.FC<{ store: AppStore }> = ({ store }) => {
+  const { state, dispatch } = store;
+  const { settings } = state;
+  const LATE_CANCEL_HOURS = settings.lateCancelHours;
+  const GRACE_HOURS = settings.graceHours;
   const now = useNow(1000);
   const [tryAthlete, setTryAthlete] = useState(state.players[0]?.id ?? '');
   const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
@@ -46,8 +41,8 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
     return session ? sessionPhase(session, now) === 'upcoming' : false;
   });
 
-  const act = async (fn: typeof waiveLateCancel, bookingId: string, tone: ToastTone) => {
-    const result = await run(s => fn(s, bookingId, new Date()));
+  const act = async (type: 'waive' | 'enforce', bookingId: string, tone: ToastTone) => {
+    const result = await dispatch({ type, bookingId }, { quiet: true });
     setToast({ message: result.message, tone: result.ok ? tone : 'bad' });
   };
 
@@ -75,7 +70,10 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
             </div>
             <p className="text-slate-300">
               The credit is held for {GRACE_HOURS} hours. Coach can waive it (injury, emergency) or enforce it. If Coach does nothing, it is
-              used when the {GRACE_HOURS} hours run out.
+              used when the {GRACE_HOURS} hours run out.{' '}
+              {settings.lateSpot === 'refill'
+                ? 'Meanwhile the spot is open to others; if the session fills back up, the athlete gets the credit back automatically (empty spots fill first).'
+                : 'The spot stays empty.'}
             </p>
           </div>
         </div>
@@ -114,13 +112,13 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => act(waiveLateCancel, b.id, 'good')}
+                  onClick={() => act('waive', b.id, 'good')}
                   className="min-h-[44px] text-xs font-semibold bg-brand-success hover:bg-green-800 text-white py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5"
                 >
                   <HeartHandshake className="w-4 h-4" /> Waive & excuse
                 </button>
                 <button
-                  onClick={() => act(enforceLateCancel, b.id, 'warn')}
+                  onClick={() => act('enforce', b.id, 'warn')}
                   className="min-h-[44px] text-xs font-semibold bg-brand-card hover:bg-red-500/20 border border-brand-border hover:border-red-500/40 text-slate-200 hover:text-red-300 py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5"
                 >
                   <DollarSign className="w-4 h-4" /> Enforce
@@ -131,11 +129,11 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
         })}
       </section>
 
-      <section className="bg-brand-card border border-brand-border rounded-2xl p-4 sm:p-5 space-y-3" aria-label="Try the rules">
+      <section className="bg-brand-card border border-brand-border rounded-2xl p-4 sm:p-5 space-y-3" aria-label="Cancel for an athlete">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-bold text-white">Try the rules</h3>
-            <p className="text-xs text-slate-400">Cancel a booking as the athlete would. The same button is in each athlete's portal.</p>
+            <h3 className="text-sm font-bold text-white">Cancel for an athlete</h3>
+            <p className="text-xs text-slate-400">If an athlete calls or texts to cancel, do it here. The same rules apply as when they cancel in their app.</p>
           </div>
           <AthletePicker players={state.players} value={tryAthlete} onChange={setTryAthlete} />
         </div>
@@ -143,7 +141,7 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
         {tryBookings.map(b => {
           const { session } = lookup(b);
           if (!session) return null;
-          const preview = cancellationPreview(session, now);
+          const preview = cancellationPreview(session, now, settings);
           return (
             <div key={b.id} className="bg-brand-surface border border-brand-border rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div>
@@ -157,12 +155,12 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
               </div>
               <button
                 onClick={async () => {
-                  const result = await run(s => cancelBooking(s, b.id, new Date()));
+                  const result = await dispatch({ type: 'cancel', bookingId: b.id }, { quiet: true });
                   setToast({ message: result.message, tone: result.ok ? (preview.kind === 'early' ? 'good' : 'warn') : 'bad' });
                 }}
                 className="min-h-[44px] px-4 py-2 rounded-xl bg-brand-card border border-brand-border hover:border-brand-orange text-slate-200 font-semibold"
               >
-                Cancel as athlete
+                Cancel for them
               </button>
             </div>
           );
@@ -177,7 +175,7 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
           {history.map(b => {
             const { player, session } = lookup(b);
             if (!player || !session) return null;
-            const s = STATUS_TEXT[b.status];
+            const s = b.decisionReason === 'refilled' ? { label: 'Spot refilled · credit restored', tone: 'text-brand-green' } : b.decisionReason === 'expired' ? { label: 'Grace ran out · credit used', tone: 'text-red-400' } : STATUS_TEXT[b.status];
             return (
               <div key={b.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs border-b border-brand-border/50 last:border-0 py-2">
                 <span className="text-slate-200">

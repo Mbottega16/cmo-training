@@ -1,7 +1,16 @@
-import type { DemoState, Booking, TrainingSession } from './types';
+import type { DemoState, Booking, Settings, TrainingSession } from './types';
 
 /** Bump when the saved shape changes; older saved data is replaced with a fresh seed. */
-export const STATE_VERSION = 3;
+export const STATE_VERSION = 4;
+
+export const DEFAULT_SETTINGS: Settings = {
+  lateCancelHours: 6,
+  graceHours: 24,
+  lateSpot: 'refill',
+  checkInXp: 50,
+  checkInOpensMinutes: 30,
+  checkInClosesHours: 12
+};
 
 /** Placeholder contact for the demo. Real coach details come from the backend later. */
 export const COACH = {
@@ -221,6 +230,7 @@ export function createSeed(now: Date = new Date()): DemoState {
       { id: 'c1', playerId: 'p1', text: 'Focus on hip angle when breaking down off the catch.', createdAt: iso(t - 26 * HOUR) },
       { id: 'c2', playerId: 'p1', text: 'Eyes on the rim before deciding to pass.', createdAt: iso(t - 26 * HOUR) }
     ],
-    notifyPrefs: {}
+    notifyPrefs: {},
+    settings: { ...DEFAULT_SETTINGS }
   };
 }

@@ -1,61 +1,84 @@
 # CMO Training — rules & map (read this first)
 
-Mobile-first installable web app (PWA) for CMO Training, a basketball skills trainer. Currently a **demo with no backend**.
+Mobile-first installable web app (PWA) for CMO Training, a basketball skills trainer. Three pages (coach, athlete, dev),
+a demo mode with no backend, and a free Supabase backend that switches on with two repository variables.
 
 **History:** `HISTORY.md`, newest first. **Business side:** the vault's `projects/cmo-training/context.md`.
+**Live:** https://mbottega16.github.io/cmo-training/ (GitHub Pages; a push to master deploys after tests pass).
 
 ## What this is
-- **What:** Coach + athlete app: court check-ins (Floor Mode), film breakdown with drawings and voice memos, a video room, booking, and a 6-hour cancellation rule with a 24-hour grace window.
-- **For:** The coach behind CMO Training and their high school, college and pro athletes.
-- **Platform / stack:** React 19, TypeScript 7, Vite 8, Tailwind 3, Lucide. Static site, no server yet.
-- **Money:** Planned Stripe (drop-ins, packages, monthly with rollover). Not connected.
-- **What "done" looks like:** A court-tested app with real accounts and data, where the coach checks in a roster in seconds, breaks down film, and meets athletes on video.
+- **What:** Coach + athlete app: court check-ins (Floor Mode), film breakdown with drawings and voice memos, two-way
+  video calls, booking, a late-cancel policy with a grace window and refill refunds, and a coach admin (Manage).
+- **For:** The coach behind CMO Training (the owner's stepbrother) and their high school, college and pro athletes.
+- **Platform / stack:** React 19, TypeScript 7, Vite 8 (multi-page), Tailwind 3, Lucide. Supabase free plan. GitHub Pages.
+- **Money:** Payments outside the app for now; the coach adds credits on Manage. Stripe later needs the owner's yes.
+- **What "done" looks like:** The coach runs real sessions from the coach page, athletes book and get film on theirs.
 
 ## Settled decisions (don't re-argue)
-- Installable web app, not an App Store app.
-- Four core parts: video room, cancellation & grace engine, Floor Mode, film studio.
-- Skill levels and drill categories stay free text, not a fixed ladder.
-- Cancel 6+ hours before: credit restored. Under 6 hours: credit held 24 hours; coach can waive or enforce; it is used when the window runs out. Exactly 6 hours counts as on time.
-- A credit is used at **booking**, not at check-in. Check-in only gives XP (+50) and is open from 30 min before start to 12 h after end.
-- A late cancel keeps its spot locked (pending or forfeited); a timely cancel or a coach waiver frees it.
-- Unused monthly sessions roll over (no UI yet).
+- Installable web app, not an App Store app. Free hosting (GitHub Pages) and a free backend (Supabase free plan).
+- Separate pages: `/coach/`, `/athlete/`, `/dev/` (owner: view toggle + Dev tools). Landing `/` links coach and athlete.
+- Rules are tunable settings (`Settings` in `types.ts`, `settings` table): late-cancel hours (6), grace hours (24),
+  `lateSpot` 'refill' (default) or 'lock', check-in XP (50), check-in opens 30 min before / closes 12 h after.
+- A credit is used at **booking**. Check-in only gives XP. Exactly 6 hours counts as on time.
+- **Refill rule:** a late-cancelled spot reopens. Newcomers fill empty spots first; only when
+  `confirmed > maxCapacity − lateCancels` was a late spot needed, and then held late cancellers (pending or forfeited,
+  oldest first, before the session starts) are refunded one per needed spot with `decisionReason: 'refilled'`.
+  Coach-waived late cancels count as already refunded. 'lock' keeps late spots held instead.
+- Every money/time/role rule exists twice and must match: `src/logic.ts` (demo) and `supabase/schema.sql` (server,
+  server clock). Change both, and the tests for both.
+- No e-mails needed: sign-in is e-mail + password with confirmation off; access comes from 8-character invite codes.
 - The public repo holds **mock data only**. No real athlete names, phones, emails or film, ever.
 
 ## How it's built
-- `src/App.tsx` — shell, hash routing (`#/coach/<floor|film|room|policy>`, `#/athlete/<id>/<portal|film|room>`), demo banner, reset.
-- `src/logic.ts` — **every rule** as pure functions (book, cancel, waive, enforce, grace expiry, attendance/XP, drawing frames, saved-data validation). No React, no browser APIs.
-- `src/seed.ts` — demo data with session times relative to "now" (one live, one under 6h, others later). Bump `STATE_VERSION` when the saved shape changes.
-- `src/store.ts` — `useDemoStore`: every change runs inside a Web Locks lock shared by all tabs, re-reads `localStorage`, applies the rule, saves. Grace expiry every 15 s. `run`/`update` are async.
-- `src/components/ErrorBoundary.tsx` — crash screen with Reload / Reset demo data. `src/main.tsx` also refuses to run inside another site's frame and asks for persistent storage.
-- `src/media.ts` — IndexedDB for voice memos and film loaded from the device (falls back to raw bytes where Safari private mode refuses files; clips capped at 300 MB).
-- `src/format.ts` — dates, countdowns, video time, plurals, `useNow`.
-- `src/components/` — `CoachFloorMode`, `FilmBreakdownStudio` (coach + read-only athlete mode), `VirtualMeetingRoom` (coach + athlete mode), `CancellationEngine`, `PlayerView`, `Navigation`, `ui.tsx` (Avatar, Modal, Toast, Switch, pickers).
-- `public/` — `manifest.webmanifest`, `sw.js` (offline shell; prod only), icons, `samples/pick-and-roll.mp4` (our own animated diagram, 10 s; seeded notes/drawings line up with it at 3.2 s and 7.8 s).
-- `vite.config.ts` — `base: './'`, dev bound to 127.0.0.1, `assetsInlineLimit: 0` (inlined data: fonts would be blocked by the CSP), CSP meta tag injected at build only.
-- `Start CMO Training App.command` / `.bat` — launchers (install on first run, open the right port).
+- `index.html`, `coach/index.html`, `athlete/index.html`, `dev/index.html` → `src/entries/*.tsx` → `src/apps/boot.tsx`
+  (frame guard, error boundary, backend choice, clock sync, service worker) → `src/apps/pages.tsx` (CoachPage,
+  AthletePage, DevPage, Landing) → `src/apps/screens.tsx` (coach and athlete screens, reused by the dev page).
+- Routing is the hash: coach `#/<tab>/<athleteId?>`, athlete `#/<tab>/<athleteId?>`, dev `#/coach/…`, `#/athlete/…`,
+  `#/tools`. `src/router.ts` (`useHashParts`, `pageUrl` for sibling pages under any base path).
+- `src/logic.ts` — every rule; `applyCommand(state, Command, now)` is the one way state changes.
+- `src/backend/` — `types.ts` (Backend, AuthApi), `local.ts` (demo: localStorage + Web Locks + IndexedDB +
+  BroadcastChannel), `supabase.ts` (RPCs, tables, storage, realtime, private call channels), `mapping.ts` (rows ↔
+  state), `index.ts` (picks Supabase when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are set, unless the dev page
+  forced demo in this browser; supabase-js is lazy-loaded).
+- `src/store.ts` — `useAppStore(backend)`: `state`, `dispatch(cmd, {quiet})`, page-wide `problem`.
+- `src/clock.ts` — `now()` = device time + server offset (from the page's `Date` header) + dev-page time travel.
+- `src/rtc.ts` — 1-on-1 WebRTC call; signalling via `backend.signal(room)`; room = athlete id; Google STUN, no TURN.
+- `supabase/schema.sql` — tables, RLS, rule functions (`book_session`, `cancel_booking`, `waive_late_cancel`, …),
+  invites, storage policies (`films|memos/<athlete id>/…`), realtime call-channel policies, pg_cron grace expiry.
+- `src/components/` — screens plus `CoachManage`, `DevTools`, `AuthGate`, `Shell`, `Navigation` (Header, TabBar), `ui`.
+- `public/` — `coach.webmanifest`, `athlete.webmanifest`, `sw.js` (precache list + cache name injected at build),
+  icons, `samples/pick-and-roll.mp4`.
+- `.github/workflows/pages.yml` (test → build → deploy), `keep-backend-awake.yml` (pings Supabase every 3 days).
 
 ## Commands & Verification
-- `npm run dev` — local only, 127.0.0.1:5173 or the next free port (5173 is often taken by other projects on the Mac).
-- `npm run phone` — build, then serve the built app to the Wi-Fi network (never the dev server). Camera/mic/install won't work over plain http on a phone.
-- `npm test` — 16 rule tests (`tests/logic.test.ts`, Node 23.6+ runs the TypeScript directly).
-- `npm run build` — `tsc` + Vite build. Must pass with zero errors.
-- Browser check: there is no committed browser suite. Verify UI changes in real Chrome at phone (390×844), laptop (1366×768) and desktop (1920×1080) sizes; headless Chromium can't play the H.264 sample, use `channel: 'chrome'`. Also run Playwright `webkit` for Safari behaviour (no fake camera there). Playwright screenshots trigger two harmless CSP warnings in WebKit.
+- `npm run dev` — 127.0.0.1:5173 or the next free port (other projects on the Mac use 5173). `npm run phone` serves
+  the built app to Wi-Fi.
+- `npm test` — 19 rule tests (`tests/logic.test.ts`) + 16 database tests (`tests/sql.test.ts`, real Postgres via
+  PGlite with stand-ins for Supabase's auth/storage/realtime). Node 23.6+.
+- `npm run build` — `tsc` + Vite. Must pass with zero errors.
+- Browser checks (not committed; recipe in the vault's `skills/web-bible`): real Chrome (`channel: 'chrome'`) at
+  390×844, 1366×768, 1920×1080 with fake camera/mic, WebKit for Safari, axe-core for WCAG 2.2 AA, attack pass.
+- Never verified against a real Supabase project until the owner creates one (see SETUP-BACKEND.md); the SQL is tested
+  on PGlite and the JS adapter is type-checked only.
 
 ## Never Read / Noise Zones (Do Not Scan)
 - `node_modules/`, `dist/`, `.git/`, `public/samples/*.mp4`, `public/icons/*.png`.
 
 ## Rules & Gotchas
-- UI work follows the Web Interface Guidelines (github.com/vercel-labs/web-interface-guidelines) plus the owner's house rules (vault skill `web-bible`).
-- White text only on `brand-action` / `brand-success` / `brand-info` (≥5:1). `brand-orange` is for accents and text on dark; it fails behind white text (3.1:1).
-- Tabs are real `<a href>` links; the coach's chosen athlete is in the URL (`#/coach/<tab>/<athleteId>`). Phone form fields are forced to 16px (iOS zoom).
-- Rules live in `logic.ts` only; components call them. Add a test for any rule change and check it can fail.
-- Everything is client-side, so any athlete can edit their own credits in DevTools. Fine for a demo; the backend must re-run these rules on the server.
-- Drawings are stored as 0..1 coordinates per frame (±0.15 s) and only show while paused.
-- The video element in the room stays mounted during a call; unmounting it loses the camera stream. Leaving the tab stops all tracks.
-- The service worker registers only in production builds; it precaches the sample clip and answers video byte-range requests from that cached copy (bump `CACHE` in `public/sw.js` when its file list changes).
-- Don't add outside image/video/font hosts: the build CSP is `'self'` only. Update `vite.config.ts` CSP if a new host is truly needed.
+- UI follows the vault's `web-bible` skill (Vercel Web Interface Guidelines + house rules).
+- White text only on `brand-action` / `brand-success` / `brand-info`. `brand-orange` fails behind white text.
+- Sample clip URLs are site-root relative: resolve with `pageUrl('')`, never relative to the page.
+- The service worker matches cached files with `ignoreVary` (servers send `Vary: Origin`; module scripts carry Origin).
+- Media keys must be `films/<athleteId>/…` or `memos/<athleteId>/…` (storage RLS reads the second folder).
+- CSP is `'self'` plus the Supabase origin when configured. `assetsInlineLimit: 0` keeps fonts out of `data:` URLs.
+- Demo data is per browser and editable by its owner; real trust needs the backend. Coach/dev pages are open in demo.
 
 ## Session Handoff (Last Worked On · Current State · Next Up)
-- **Last Worked On (2026-11-03):** v0.3 hardening (see HISTORY). Before that, v0.2. Fixed all 15 audit bugs, made the fake parts real where possible without a server (bookings, cancels with live countdowns, XP, voice memos, drawings on frames, per-athlete views, saving, invite links), added install-to-home-screen + offline, CSP, our own sample clip (the old Google sample URL returns 403), launchers, and rule tests.
-- **Current State:** `npm test` 16/16, build clean, 56/56 browser checks in Chrome (phone/laptop/desktop) with 0 console errors, 11/11 in WebKit, axe-core 0 WCAG 2.2 AA violations on 14 screen/size combinations. Not hosted anywhere yet. Remaining issues all need a server or the owner (see vault context.md).
-- **Next Up:** Show the coach and collect notes. Then decide the backend (accounts, database, Stripe, messaging, video service) — all need the owner's sign-off on cost. Hosting on GitHub Pages needs a yes too.
+- **Last Worked On (2026-11-03):** v0.4. Split into coach/athlete/dev pages + landing; Dev tools (rules, time travel,
+  athlete edits, demo export/import/reset, people & roles); coach Manage tab; free Supabase backend (schema + RLS +
+  server-side rules + invites + storage + realtime + cron) behind a Backend interface; real two-way WebRTC calls;
+  late-cancel fix (refill refunds, trusted clock, staff-only waive); GitHub Pages deploy + keep-awake; MIT licence.
+- **Current State:** 35/35 unit+SQL tests; Chrome 49/49 browser checks, 0 console errors; WebKit 11/11; axe 0
+  violations on 22 screen/size combinations. Pages deploys in demo mode until the Supabase variables exist.
+- **Next Up:** Owner creates the free Supabase project (SETUP-BACKEND.md), then verify the live backend end to end
+  (sign-up, invites, booking on two phones, a call across two networks). Then: reminders (web push), Stripe (needs a yes).

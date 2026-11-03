@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import type { SessionType } from './types';
 
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -65,12 +64,4 @@ export function sessionTypeLabel(type: SessionType, maxCapacity: number): string
   return `Small group (max ${maxCapacity})`;
 }
 
-/** A clock that re-renders the caller every `intervalMs`. */
-export function useNow(intervalMs = 1000): Date {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), intervalMs);
-    return () => window.clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
+export { useNow } from './clock';

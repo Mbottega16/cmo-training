@@ -1,0 +1,22 @@
+# Supabase pauses free projects after 7 days without use. This free GitHub job makes one tiny request every 3 days
+# so a quiet week (holidays, off-season) doesn't take the app offline. It does nothing until the backend is set up.
+name: Keep the free backend awake
+
+on:
+  schedule:
+    - cron: '17 9 */3 * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    if: ${{ vars.SUPABASE_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the backend
+        run: |
+          curl -fsS -o /dev/null "$URL/rest/v1/settings?select=id" -H "apikey: $KEY"
+        env:
+          URL: ${{ vars.SUPABASE_URL }}
+          KEY: ${{ vars.SUPABASE_ANON_KEY }}

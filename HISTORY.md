@@ -1,5 +1,15 @@
 # CMO Training — Session History
 
+## 2026-11-03 — v0.4: three pages, free backend, free hosting, late-cancel fix
+
+- Split into `/coach/`, `/athlete/` and `/dev/` (+ landing). The dev page toggles Coach / Athlete views and has Dev tools: tunable rules (late-cancel hours, grace hours, refill vs lock, XP, check-in window), time travel, athlete edits, demo export/import/reset, people & roles. Coach got a Manage tab (athletes, credits, invites, schedule).
+- Free backend on Supabase: `supabase/schema.sql` (tables, row-level security, server-side rule functions on the server clock, invite codes, storage policies, private call channels, pg_cron grace expiry). The app talks to it through a `Backend` interface (`src/backend/`); without the two repo variables it stays in demo mode. SQL tested on real Postgres via PGlite (15 tests: privacy, no self-waive, no direct credit edits, refill, lock, expiry, check-in window, invites, storage and channel access).
+- Late-cancel fix: refill rule (a late-cancelled spot reopens; newcomers fill empty spots first, and only when the session is fuller than it could be without the late cancels is a canceller refunded, oldest first; a first version refunded even when a newcomer just took an empty spot, caught by a mutation test that slipped through), trusted time (server clock in the backend; the page's `Date` header in the demo, so changing the phone clock no longer dodges a late cancel), waive/enforce only on the coach page and server-checked.
+- Real two-way video calls (WebRTC, free; signalling via Supabase Realtime or BroadcastChannel in the demo).
+- Hosting: GitHub Pages workflow (test → build → deploy) and a keep-awake ping for the free backend. MIT licence (code only; brand excluded). `SETUP-BACKEND.md` for the owner.
+- Found and fixed while testing: sample clip URL broke on sub-pages; offline athlete page failed because the service worker only had visited pages' scripts (now precaches every built file) and because `Vary: Origin` stopped cache matches (`ignoreVary`); dev header crowded on phones; 5 coach tabs didn't fit 360 px phones.
+- Checks: 35/35 tests (mutations of the refill rule caught in both copies); Chrome 49/49 browser checks at 3 sizes with 0 console errors; WebKit 11/11; axe 0 violations on 22 screen/size combinations; script injection blocked.
+
 ## 2026-11-03 — v0.3: hardening after the second critique
 
 - Damaged saved data no longer blanks the app: every saved record is checked (`isValidState`), and a crash screen (`ErrorBoundary`) offers Reload / Reset demo data.

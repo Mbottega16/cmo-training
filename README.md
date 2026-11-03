@@ -1,56 +1,63 @@
-# CMO Training — Basketball Coach & Athlete App (demo)
+# CMO Training — Basketball Coach & Athlete App
 
 A mobile-first web app for **CMO Training** ([@cmo.training](https://instagram.com/cmo.training)), a basketball skills
 trainer working with late high school, college and pro athletes. It installs to a phone's home screen like an app,
 with no App Store.
 
-> **This is a demo with made-up data.** Everything is saved in your own browser only. Payments, text and email
-> reminders, and live video calls with a second person are not connected yet.
+**Live:** <https://mbottega16.github.io/cmo-training/> — runs as a demo with made-up data until the free backend is
+switched on ([SETUP-BACKEND.md](SETUP-BACKEND.md)).
 
-## What works in the demo
+## Three pages
 
-| Part | What you can do |
-|---|---|
-| **Floor Mode** (coach) | Pick a session, check athletes in with one tap (+50 XP; opens 30 minutes before start), mark no-shows, and assign a homework drill that appears in the athlete's portal right away. Big buttons for use on court. |
-| **Film Studio** (coach) | Play a clip, step frame by frame, and draw on the paused frame with finger, pen or mouse (pen, arrow, spotlight circle, four colours). Drawings stay on their moment of the clip. Add timestamped notes and record real voice memos. Load your own film from the device. |
-| **Video Room** | Open the room and test your camera and mic, copy an invite link, and keep coaching notes per athlete. *A second person can't join yet; that needs a video service.* |
-| **Cancellations & 24h grace** | Real rules on real times: cancel 6+ hours before and the credit comes back; later than that, the credit is held for 24 hours with a live countdown until the coach waives or enforces it (or time runs out). A late-cancelled spot stays locked unless the coach waives it. |
-| **Athlete portal** | Book open sessions with a credit, cancel with the rule explained first, see drills and film from the coach, and set reminder preferences. |
+| Page | Address | For |
+|---|---|---|
+| **Coach** | `/coach/` | Floor Mode check-ins, film breakdown, video room, cancellations, and **Manage** (athletes, credits, invites, schedule). |
+| **Athlete** | `/athlete/` | Book and cancel sessions, drills and film from Coach, video sessions, reminder settings. |
+| **Dev** | `/dev/` | The owner's page: switch between the coach and athlete views, and **Dev tools** to change the rules (late-cancel hours, grace window, refill or lock, XP, check-in window), travel in time for testing, edit athletes, export/import/reset demo data, and manage people and roles. |
 
-Switch between **Coach** and **Athlete** in the top right (a demo switch; there are no logins yet). Use **Reset demo**
-to start over with fresh session times. Open the app in two tabs (one coach, one athlete) to see changes appear in both.
+The front page (`/`) links to the coach and athlete pages. With the backend on, each page needs a sign-in: coaches and
+the owner on the coach page, athletes on theirs, only the owner on the dev page.
 
-## Run it
+## What works
 
-You need [Node.js](https://nodejs.org) 20 or newer.
+- **Floor Mode:** one-tap check-in (+XP, opens 30 minutes before a session), no-shows, homework drills that appear on
+  the athlete's phone straight away.
+- **Film Studio:** frame-by-frame playback, drawing on the paused frame with finger, pen or mouse (pen, arrow, spotlight
+  circle), timestamped notes, recorded voice memos, and the coach's own clips loaded from the device.
+- **Video Room:** real two-way video between the coach and the athlete, straight between the two devices (WebRTC),
+  free, no Zoom or Meet account. The invite link opens the athlete's room.
+- **Cancellations:** cancel 6+ hours before and the credit comes back. Later than that the credit is held for 24 hours
+  while the coach waives or enforces it; when the time runs out it's used. **The late-cancelled spot reopens, and if the
+  session fills back up (empty spots fill first), the canceller gets the credit back automatically** (or switch the dev page rule
+  to keep the spot locked). With the backend these rules run on the server with the server's clock; in the demo, the
+  app checks the time against the web server, so changing the phone's clock doesn't help.
+- **Installable and offline:** add to the home screen; the coach and athlete pages open with no signal once visited.
+
+Payments are taken outside the app for now (cash, Venmo, e-transfer); the coach adds credits on **Manage**. Text,
+e-mail and push reminders are not connected yet.
+
+## Run it on a computer
+
+You need [Node.js](https://nodejs.org) 20 or newer (24 for the tests).
 
 ```bash
 npm install
-npm run dev          # http://127.0.0.1:5173 (or the next free port), this computer only
-npm run phone        # builds, then serves the built app to phones on the same Wi-Fi
-npm test             # the booking, cancellation, credit and drawing rules (Node 23.6+)
-npm run build        # production build in dist/
+npm run dev     # http://127.0.0.1:5173 (or the next free port), this computer only
+npm run phone   # builds, then serves the built app to phones on the same Wi-Fi
+npm test        # the rules in the browser (tests/logic.test.ts) and in the database (tests/sql.test.ts)
+npm run build   # production build in dist/
 ```
 
-Or double-click **Start CMO Training App.command** (Mac) or **Start CMO Training App.bat** (Windows). It installs
-packages the first time and opens the app in your browser.
+Or double-click **Start CMO Training App.command** (Mac) or **Start CMO Training App.bat** (Windows).
 
-Camera, microphone and home-screen install need a secure address: `localhost` works, a phone on Wi-Fi over plain
-`http://` does not. Use the hosted (https) version to try those on a phone.
+To use the real backend locally, create `.env.local` with `VITE_SUPABASE_URL=…` and `VITE_SUPABASE_ANON_KEY=…`.
 
-## Install on a phone
+## How it's built
 
-Open the hosted app over https, then **Share → Add to Home Screen** (iPhone, Safari) or **⋮ → Install app**
-(Android, Chrome). Once installed it opens without a signal, for example in a gym with bad reception.
+React 19, TypeScript, Vite, Tailwind CSS, Lucide icons, self-hosted Inter and Teko fonts. Backend: Supabase (free plan:
+Postgres with row-level security, auth, file storage, realtime). Hosting: GitHub Pages, deployed by
+`.github/workflows/pages.yml` after the tests pass. The sample play is an animated diagram made for this demo.
 
-## Not built yet
+## Licence
 
-Accounts and logins, payments (Stripe), text/email/push reminders, live two-way video, uploading film to a server,
-and a drill video library. Until a server exists, every rule runs in the browser and anyone can change their own
-browser data, so the demo must not be used for real bookings or money.
-
-## Tech
-
-React 19, TypeScript, Vite, Tailwind CSS, Lucide icons, self-hosted Inter and Teko fonts (Fontsource). No backend and
-no requests to other sites. Data lives in `localStorage` (tabs take turns writing); voice memos and loaded film live
-in the browser's IndexedDB. The sample play is an animated diagram made for this demo.
+MIT for the code ([LICENSE](LICENSE)). The "CMO Training" name, logo and brand belong to CMO Training.

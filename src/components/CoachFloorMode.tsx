@@ -1,15 +1,16 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Check, X, Clock, MapPin, Dumbbell, Send, Users } from 'lucide-react';
 import type { Player } from '../types';
-import type { DemoStore } from '../store';
-import { assignHomework, attendanceWindow, CHECK_IN_OPENS_MINUTES, CHECK_IN_XP, confirmedBookings, sessionPhase, setAttendance } from '../logic';
+import type { AppStore } from '../store';
+import { attendanceWindow, confirmedBookings, sessionPhase } from '../logic';
 import { formatSessionTime, plural, sessionTypeLabel, useNow } from '../format';
 import { Avatar, Modal, Toast, XpBadge } from './ui';
 
 const DRILL_CATEGORIES = ['Ball Handling', 'Shooting Mechanics', 'Finishing & Footwork', 'Decision Making / Reads', 'Conditioning & Agility', 'Defense'];
 
-export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
-  const { state, update } = store;
+export const CoachFloorMode: React.FC<{ store: AppStore }> = ({ store }) => {
+  const { state, dispatch } = store;
+  const { settings } = state;
   const now = useNow(30_000);
 
   const sortedSessions = useMemo(
@@ -39,26 +40,17 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
     .map(b => ({ booking: b, player: state.players.find(p => p.id === b.playerId) }))
     .filter((r): r is { booking: typeof r.booking; player: Player } => Boolean(r.player));
   const checkedIn = roster.filter(r => r.booking.attendance === 'present').length;
-  const checkInWindow = attendanceWindow(session, now);
+  const checkInWindow = attendanceWindow(session, now, settings);
   const checkInOpen = checkInWindow === 'open';
 
   const handleAssign = (e: React.FormEvent) => {
     e.preventDefault();
     if (!assignTo || !drillTitle.trim()) return;
-    update(s =>
-      assignHomework(
-        s,
-        {
-          playerId: assignTo.id,
-          title: drillTitle.trim(),
-          category: drillCategory.trim() || 'General',
-          repsOrMinutes: drillReps.trim(),
-          notes: drillNote.trim()
-        },
-        new Date()
-      )
-    );
-    setToast(`Drill assigned to ${assignTo.name}. It's in their portal now.`);
+    const who = assignTo.name;
+    void dispatch({
+      type: 'homework.assign',
+      hw: { playerId: assignTo.id, title: drillTitle.trim(), category: drillCategory.trim() || 'General', repsOrMinutes: drillReps.trim(), notes: drillNote.trim() }
+    }).then(r => r.ok && setToast(`Drill assigned to ${who}. It's in their portal now.`));
     setDrillTitle('');
     setDrillNote('');
     setAssignTo(null);
@@ -119,7 +111,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
             <Users className="w-3.5 h-3.5" />
             {roster.length} / {session.maxCapacity} booked · {checkedIn} checked in
           </span>
-          <span className="text-brand-orange font-medium">Check-in = +{CHECK_IN_XP} XP</span>
+          <span className="text-brand-orange font-medium">Check-in = +{settings.checkInXp} XP</span>
         </div>
       </div>
 
@@ -128,7 +120,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
       {!checkInOpen && roster.length > 0 && (
         <div className="bg-brand-surface border border-brand-border rounded-xl px-4 py-3 text-xs text-slate-300">
           {checkInWindow === 'early'
-            ? `Check-in opens ${CHECK_IN_OPENS_MINUTES} minutes before the session starts. You can still assign drills.`
+            ? `Check-in opens ${settings.checkInOpensMinutes} minutes before the session starts. You can still assign drills.`
             : 'Check-in for this session is closed.'}
         </div>
       )}
@@ -168,7 +160,7 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
 
                 <div className="flex items-stretch gap-2">
                   <button
-                    onClick={() => update(s => setAttendance(s, booking.id, status === 'present' ? 'pending' : 'present', new Date()))}
+                    onClick={() => void dispatch({ type: 'attendance', bookingId: booking.id, attendance: status === 'present' ? 'pending' : 'present' })}
                     disabled={!checkInOpen}
                     aria-pressed={status === 'present'}
                     className={`flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -178,11 +170,11 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
                     }`}
                   >
                     <Check className="w-4 h-4" />
-                    {status === 'present' ? `Checked in (+${CHECK_IN_XP} XP)` : 'Check in'}
+                    {status === 'present' ? `Checked in (+${settings.checkInXp} XP)` : 'Check in'}
                   </button>
 
                   <button
-                    onClick={() => update(s => setAttendance(s, booking.id, status === 'absent' ? 'pending' : 'absent', new Date()))}
+                    onClick={() => void dispatch({ type: 'attendance', bookingId: booking.id, attendance: status === 'absent' ? 'pending' : 'absent' })}
                     disabled={!checkInOpen}
                     aria-pressed={status === 'absent'}
                     aria-label={status === 'absent' ? `Undo no-show for ${player.name}` : `Mark ${player.name} as a no-show`}

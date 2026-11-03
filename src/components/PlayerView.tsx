@@ -1,32 +1,25 @@
 import React, { useCallback, useState } from 'react';
 import { Calendar, Clock, MapPin, Dumbbell, CheckCircle2, Circle, Film, Bell, Video, CreditCard, ChevronRight, Phone, MessageSquare } from 'lucide-react';
 import type { Booking, NotifyPrefs } from '../types';
-import type { DemoStore } from '../store';
-import type { Route } from './Navigation';
-import {
-  bookSession,
-  cancelBooking,
-  cancellationPreview,
-  DEFAULT_NOTIFY,
-  GRACE_HOURS,
-  LATE_CANCEL_HOURS,
-  sessionPhase,
-  setNotifyPrefs,
-  spotsLeft,
-  toggleHomework
-} from '../logic';
+import type { AppStore } from '../store';
+import { cancellationPreview, DEFAULT_NOTIFY, sessionPhase, spotsLeft } from '../logic';
 import { COACH } from '../seed';
 import { formatAgo, formatCountdown, formatHours, formatSessionTime, plural, sessionTypeLabel, useNow } from '../format';
 import { AthletePicker, Avatar, Modal, Switch, Toast, XpBadge, type ToastTone } from './ui';
 
 interface PlayerViewProps {
-  store: DemoStore;
+  store: AppStore;
   athleteId: string;
-  navigate: (route: Route) => void;
+  /** Demo and dev page only: switch which athlete you are viewing as. */
+  onSwitchAthlete?: (id: string) => void;
+  onOpen: (tab: 'film' | 'room') => void;
 }
 
-export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, navigate }) => {
-  const { state, run, update } = store;
+export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwitchAthlete, onOpen }) => {
+  const { state, dispatch } = store;
+  const { settings } = state;
+  const LATE_CANCEL_HOURS = settings.lateCancelHours;
+  const GRACE_HOURS = settings.graceHours;
   const now = useNow(1000);
   const player = state.players.find(p => p.id === athleteId) ?? state.players[0];
 
@@ -61,36 +54,33 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const picked = openSessions.find(s => s.id === pickedSession) ?? null;
 
-  const toggleNotify = (key: keyof NotifyPrefs) => update(s => setNotifyPrefs(s, player.id, { ...prefs, [key]: !prefs[key] }));
+  const toggleNotify = (key: keyof NotifyPrefs) => void dispatch({ type: 'notify', playerId: player.id, prefs: { ...prefs, [key]: !prefs[key] } });
 
   const confirmBooking = async () => {
     if (!picked) return;
-    const result = await run(s => bookSession(s, picked.id, player.id, new Date()));
+    const result = await dispatch({ type: 'book', sessionId: picked.id, playerId: player.id }, { quiet: true });
     setToast({ message: result.message, tone: result.ok ? 'good' : 'bad' });
     if (result.ok) closeBooking();
   };
 
   const confirmCancel = async () => {
     if (!cancelTarget) return;
-    const result = await run(s => cancelBooking(s, cancelTarget.id, new Date()));
-    const late = result.ok && result.state.bookings.find(b => b.id === cancelTarget.id)?.status === 'cancelled_late';
+    const result = await dispatch({ type: 'cancel', bookingId: cancelTarget.id }, { quiet: true });
+    const late = result.ok && result.message.startsWith('Late cancel');
     setToast({ message: result.message, tone: !result.ok ? 'bad' : late ? 'warn' : 'good' });
     setCancelTarget(null);
   };
 
   const cancelSession = cancelTarget ? state.sessions.find(s => s.id === cancelTarget.sessionId) : undefined;
-  const cancelPreview = cancelSession ? cancellationPreview(cancelSession, now) : null;
+  const cancelPreview = cancelSession ? cancellationPreview(cancelSession, now, settings) : null;
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex justify-end">
-        <AthletePicker
-          label="Demo: viewing as"
-          players={state.players}
-          value={player.id}
-          onChange={id => navigate({ role: 'player', athleteId: id, tab: 'portal' })}
-        />
-      </div>
+      {onSwitchAthlete && (
+        <div className="flex justify-end">
+          <AthletePicker label="Viewing as" players={state.players} value={player.id} onChange={onSwitchAthlete} />
+        </div>
+      )}
 
       <div className="bg-gradient-to-r from-brand-card via-brand-surface to-brand-card border border-brand-border rounded-2xl p-4 sm:p-5 shadow-lg">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -193,7 +183,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                       <div className="flex gap-2 w-full sm:w-auto">
                         {session.type === 'virtual_live' && (
                           <button
-                            onClick={() => navigate({ role: 'player', athleteId: player.id, tab: 'room' })}
+                            onClick={() => onOpen('room')}
                             className="flex-1 sm:flex-initial min-h-[44px] px-3.5 py-2 rounded-xl bg-brand-info hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
                           >
                             <Video className="w-3.5 h-3.5" /> Join room
@@ -228,7 +218,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
               return (
                 <button
                   key={f.id}
-                  onClick={() => navigate({ role: 'player', athleteId: player.id, tab: 'film' })}
+                  onClick={() => onOpen('film')}
                   className="w-full text-left bg-brand-surface hover:bg-brand-border/40 border border-brand-border rounded-xl p-4 transition flex items-center justify-between gap-3 group"
                 >
                   <div className="min-w-0">
@@ -262,7 +252,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
                   key={item.id}
                   role="checkbox"
                   aria-checked={item.completed}
-                  onClick={() => update(s => toggleHomework(s, item.id))}
+                  onClick={() => void dispatch({ type: 'homework.toggle', id: item.id })}
                   className={`w-full text-left p-3 rounded-xl border transition ${
                     item.completed ? 'bg-brand-green/10 border-brand-green/30 text-slate-400' : 'bg-brand-surface border-brand-border text-white hover:border-slate-500'
                   }`}
@@ -306,7 +296,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
             {openSessions.length === 0 && <p className="text-slate-400">No open sessions right now.</p>}
             <div className="space-y-2" role="radiogroup" aria-label="Open sessions">
               {openSessions.map(s => {
-                const hours = cancellationPreview(s, now).hoursNotice;
+                const hours = cancellationPreview(s, now, settings).hoursNotice;
                 return (
                   <button
                     key={s.id}
@@ -369,6 +359,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
               <p className="p-3 rounded-xl bg-brand-orange/10 border border-brand-orange/30 text-orange-200 text-xs">
                 That's under {LATE_CANCEL_HOURS} hours' notice, a late cancel. Your credit is held for {GRACE_HOURS} hours. Coach can waive it for an injury
                 or emergency; otherwise it's used.
+                {settings.lateSpot === 'refill' && ' If the session fills back up before it starts, you get the credit back automatically.'}
               </p>
             )}
             <div className="flex gap-2">

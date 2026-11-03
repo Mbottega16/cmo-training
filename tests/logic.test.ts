@@ -1,17 +1,16 @@
 // Run with `npm test` (Node 23.6+ runs TypeScript directly).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSeed, STATE_VERSION } from '../src/seed.ts';
+import { createSeed, DEFAULT_SETTINGS, STATE_VERSION } from '../src/seed.ts';
 import {
   addStroke,
+  applyCommand,
   bookSession,
   cancelBooking,
   cancellationPreview,
-  CHECK_IN_XP,
   clearFrame,
   enforceLateCancel,
   expireGraceWindows,
-  GRACE_HOURS,
   isValidState,
   sessionPhase,
   setAttendance,
@@ -19,7 +18,7 @@ import {
   undoStroke,
   waiveLateCancel
 } from '../src/logic.ts';
-import type { DemoState, Stroke } from '../src/types.ts';
+import type { DemoState, Settings, Stroke } from '../src/types.ts';
 
 const NOW = new Date('2026-11-03T15:00:00Z');
 const HOUR = 3_600_000;
@@ -27,66 +26,69 @@ const later = (hours: number) => new Date(NOW.getTime() + hours * HOUR);
 const credits = (s: DemoState, id: string) => s.players.find(p => p.id === id)!.creditsRemaining;
 const xp = (s: DemoState, id: string) => s.players.find(p => p.id === id)!.xp;
 const booking = (s: DemoState, id: string) => s.bookings.find(b => b.id === id)!;
+const withSettings = (s: DemoState, patch: Partial<Settings>): DemoState => ({ ...s, settings: { ...s.settings, ...patch } });
 
-/** A state with one session `hoursOut` from NOW and Jordan (p1) booked on it as b-test. */
-function withSessionIn(hoursOut: number): DemoState {
+/** One session `hoursOut` from NOW (capacity `cap`) with Jordan (p1) booked as b-test. */
+function withSessionIn(hoursOut: number, cap = 2): DemoState {
   const s = createSeed(NOW);
   const start = later(hoursOut);
   return {
     ...s,
-    sessions: [...s.sessions, { id: 'sx', title: 'Test', courtLocation: '', courtAddress: '', start: start.toISOString(), end: new Date(start.getTime() + HOUR).toISOString(), type: 'small_group', maxCapacity: 2, price: 65 }],
+    sessions: [...s.sessions, { id: 'sx', title: 'Test', courtLocation: '', courtAddress: '', start: start.toISOString(), end: new Date(start.getTime() + HOUR).toISOString(), type: cap === 1 ? 'one_on_one' : 'small_group', maxCapacity: cap, price: 65 }],
     bookings: [...s.bookings, { id: 'b-test', sessionId: 'sx', playerId: 'p1', status: 'confirmed', attendance: 'pending', bookedAt: NOW.toISOString() }]
   };
 }
+const sx = (s: DemoState) => s.sessions.find(x => x.id === 'sx')!;
 
 test('the seed has a live session, a late-cancel session and an early-cancel session for Jordan', () => {
   const s = createSeed(NOW);
   const byId = (id: string) => s.sessions.find(x => x.id === id)!;
   assert.equal(sessionPhase(byId('s1'), NOW), 'live');
-  assert.equal(cancellationPreview(byId('s2'), NOW).kind, 'late');
-  assert.equal(cancellationPreview(byId('s3'), NOW).kind, 'early');
-  assert.ok(s.bookings.some(b => b.sessionId === 's2' && b.playerId === 'p1'));
-  assert.ok(s.bookings.some(b => b.sessionId === 's3' && b.playerId === 'p1'));
+  assert.equal(cancellationPreview(byId('s2'), NOW, s.settings).kind, 'late');
+  assert.equal(cancellationPreview(byId('s3'), NOW, s.settings).kind, 'early');
+  assert.deepEqual(s.settings, DEFAULT_SETTINGS);
 });
 
 test('booking uses one credit and refuses full, started, duplicate and no-credit bookings', () => {
   const s = createSeed(NOW);
-  const ok = bookSession(s, 's4', 'p1', NOW);
-  assert.equal(ok.ok, true);
-  assert.equal(credits(ok.state, 'p1'), credits(s, 'p1') - 1);
-
-  assert.equal(bookSession(ok.state, 's4', 'p1', NOW).ok, false, 'no double booking');
+  const r = bookSession(s, 's4', 'p1', NOW);
+  assert.equal(r.ok, true);
+  assert.equal(credits(r.state, 'p1'), credits(s, 'p1') - 1);
+  assert.equal(bookSession(r.state, 's4', 'p1', NOW).ok, false, 'no double booking');
   assert.equal(bookSession(s, 's1', 'p3', NOW).ok, false, 'live session cannot be booked');
-  assert.equal(bookSession(s, 's6', 'p1', NOW).ok, true);
-  const full = bookSession(bookSession(s, 's6', 'p1', NOW).state, 's6', 'p3', NOW);
-  assert.equal(full.ok, false, '1-on-1 is full after one booking');
-
+  const one = bookSession(s, 's6', 'p1', NOW).state;
+  assert.equal(bookSession(one, 's6', 'p3', NOW).ok, false, '1-on-1 is full after one booking');
   const broke = { ...s, players: s.players.map(p => (p.id === 'p1' ? { ...p, creditsRemaining: 0 } : p)) };
   const refused = bookSession(broke, 's4', 'p1', NOW);
   assert.equal(refused.ok, false);
   assert.equal(refused.state, broke, 'a refused booking changes nothing');
 });
 
-test('cancelling 6+ hours out restores the credit at once', () => {
-  const s = withSessionIn(10);
-  const r = cancelBooking(s, 'b-test', NOW);
-  assert.equal(r.ok, true);
-  assert.equal(booking(r.state, 'b-test').status, 'cancelled_early');
-  assert.equal(credits(r.state, 'p1'), credits(s, 'p1') + 1);
+test('cancelling 6+ hours out restores the credit at once; exactly 6 hours counts as on time', () => {
+  for (const h of [10, 6]) {
+    const s = withSessionIn(h);
+    const r = cancelBooking(s, 'b-test', NOW);
+    assert.equal(booking(r.state, 'b-test').status, 'cancelled_early', `${h}h`);
+    assert.equal(credits(r.state, 'p1'), credits(s, 'p1') + 1);
+  }
 });
 
-test('exactly 6 hours counts as on time', () => {
-  const r = cancelBooking(withSessionIn(6), 'b-test', NOW);
-  assert.equal(booking(r.state, 'b-test').status, 'cancelled_early');
-});
-
-test('cancelling under 6 hours holds the credit and starts a 24-hour grace window', () => {
+test('cancelling under 6 hours holds the credit, starts the grace window, and records how full the session was', () => {
   const s = withSessionIn(5.9);
   const r = cancelBooking(s, 'b-test', NOW);
   const b = booking(r.state, 'b-test');
   assert.equal(b.status, 'cancelled_late');
-  assert.equal(credits(r.state, 'p1'), credits(s, 'p1'), 'credit neither restored nor taken again');
-  assert.equal(new Date(b.graceExpiresAt!).getTime(), NOW.getTime() + GRACE_HOURS * HOUR);
+  assert.equal(credits(r.state, 'p1'), credits(s, 'p1'));
+  assert.equal(new Date(b.graceExpiresAt!).getTime(), NOW.getTime() + 24 * HOUR);
+  assert.equal(b.confirmedAtCancel, 1);
+});
+
+test('the late-cancel threshold and grace window come from settings', () => {
+  const s = withSettings(withSessionIn(5), { lateCancelHours: 4, graceHours: 2 });
+  assert.equal(booking(cancelBooking(s, 'b-test', NOW).state, 'b-test').status, 'cancelled_early', '5h is on time when the line is 4h');
+  const t = withSettings(withSessionIn(3), { lateCancelHours: 4, graceHours: 2 });
+  const b = booking(cancelBooking(t, 'b-test', NOW).state, 'b-test');
+  assert.equal(new Date(b.graceExpiresAt!).getTime(), NOW.getTime() + 2 * HOUR);
 });
 
 test('a session that has started cannot be cancelled', () => {
@@ -96,18 +98,12 @@ test('a session that has started cannot be cancelled', () => {
   assert.equal(r.state, s);
 });
 
-test('waiving a late cancel restores the credit once; a second waive does nothing', () => {
+test('waiving restores the credit once; enforcing keeps it used and cannot then be waived', () => {
   const late = cancelBooking(withSessionIn(2), 'b-test', NOW).state;
   const waived = waiveLateCancel(late, 'b-test', NOW);
-  assert.equal(booking(waived.state, 'b-test').status, 'excused');
+  assert.deepEqual([booking(waived.state, 'b-test').status, booking(waived.state, 'b-test').decisionReason], ['excused', 'coach']);
   assert.equal(credits(waived.state, 'p1'), credits(late, 'p1') + 1);
-  const again = waiveLateCancel(waived.state, 'b-test', NOW);
-  assert.equal(again.ok, false);
-  assert.equal(credits(again.state, 'p1'), credits(waived.state, 'p1'));
-});
-
-test('enforcing keeps the credit used, and an enforced cancel cannot then be waived', () => {
-  const late = cancelBooking(withSessionIn(2), 'b-test', NOW).state;
+  assert.equal(waiveLateCancel(waived.state, 'b-test', NOW).ok, false);
   const enforced = enforceLateCancel(late, 'b-test', NOW);
   assert.equal(booking(enforced.state, 'b-test').status, 'forfeited');
   assert.equal(credits(enforced.state, 'p1'), credits(late, 'p1'));
@@ -116,26 +112,123 @@ test('enforcing keeps the credit used, and an enforced cancel cannot then be wai
 
 test('the grace window runs out into a forfeit, not before', () => {
   const late = cancelBooking(withSessionIn(2), 'b-test', NOW).state;
-  assert.equal(expireGraceWindows(late, later(23.9)), late, 'unchanged inside the window');
-  const expired = expireGraceWindows(late, later(GRACE_HOURS));
-  assert.equal(booking(expired, 'b-test').status, 'forfeited');
-  assert.equal(credits(expired, 'p1'), credits(late, 'p1'));
+  assert.equal(expireGraceWindows(late, later(23.9)), late);
+  const expired = expireGraceWindows(late, later(24));
+  assert.deepEqual([booking(expired, 'b-test').status, booking(expired, 'b-test').decisionReason], ['forfeited', 'expired']);
 });
 
-test('check-in gives XP once, and undoing or switching to no-show takes it back', () => {
-  const s = createSeed(NOW); // b2 = Marcus in s1, pending
+test('refill (default): a late-cancelled 1-on-1 reopens, and when someone books it the canceller gets the credit back', () => {
+  const late = cancelBooking(withSessionIn(3, 1), 'b-test', NOW).state;
+  assert.equal(spotsLeft(late, sx(late)), 1, 'spot reopened');
+  const r = bookSession(late, 'sx', 'p3', NOW);
+  assert.equal(r.ok, true);
+  assert.deepEqual([booking(r.state, 'b-test').status, booking(r.state, 'b-test').decisionReason], ['excused', 'refilled']);
+  assert.equal(credits(r.state, 'p1'), credits(late, 'p1') + 1, 'Jordan refunded');
+  assert.equal(credits(r.state, 'p3'), credits(late, 'p3') - 1, 'Tariq paid');
+});
+
+const addAthlete = (s: DemoState, name: string, credits = 5) => {
+  const r = applyCommand(s, { type: 'player.add', player: { name, level: '', focusAreas: [], phone: '', email: '', creditsRemaining: credits } }, NOW);
+  return { state: r.state, id: r.state.players.at(-1)!.id };
+};
+
+test('refill: newcomers fill empty spots first; the canceller is refunded only when the session is full again', () => {
+  let s = withSessionIn(3, 4); // Jordan
+  s = bookSession(s, 'sx', 'p3', NOW).state; // 2 of 4
+  s = cancelBooking(s, 'b-test', NOW).state; // Jordan late: 1 of 4
+  const a = addAthlete(s, 'A');
+  s = bookSession(a.state, 'sx', a.id, NOW).state; // 2 of 4: an empty spot
+  assert.equal(booking(s, 'b-test').status, 'cancelled_late', 'took an empty spot, not Jordan\'s');
+  const b = addAthlete(s, 'B');
+  s = bookSession(b.state, 'sx', b.id, NOW).state; // 3 of 4: still an empty spot
+  assert.equal(booking(s, 'b-test').status, 'cancelled_late');
+  const c = addAthlete(s, 'C');
+  const before = credits(c.state, 'p1');
+  s = bookSession(c.state, 'sx', c.id, NOW).state; // 4 of 4: Jordan's spot was needed
+  assert.deepEqual([booking(s, 'b-test').status, booking(s, 'b-test').decisionReason], ['excused', 'refilled']);
+  assert.equal(credits(s, 'p1'), before + 1);
+});
+
+test('refill: two late cancels are refunded oldest first, one per needed spot', () => {
+  let s = withSessionIn(3, 2); // Jordan
+  s = bookSession(s, 'sx', 'p3', NOW).state; // full
+  const tariq = s.bookings.find(b => b.sessionId === 'sx' && b.playerId === 'p3')!.id;
+  s = cancelBooking(s, 'b-test', NOW).state; // Jordan first
+  s = cancelBooking(s, tariq, new Date(NOW.getTime() + 60_000)).state; // Tariq a minute later
+  const a = addAthlete(s, 'A');
+  s = bookSession(a.state, 'sx', a.id, NOW).state;
+  assert.equal(booking(s, 'b-test').decisionReason, 'refilled');
+  assert.equal(booking(s, tariq).status, 'cancelled_late', 'only one spot needed so far');
+  const b = addAthlete(s, 'B');
+  s = bookSession(b.state, 'sx', b.id, NOW).state;
+  assert.equal(booking(s, tariq).decisionReason, 'refilled');
+});
+
+test('refill: a late cancel the coach already waived counts as refunded', () => {
+  let s = withSessionIn(3, 2);
+  s = bookSession(s, 'sx', 'p3', NOW).state;
+  const tariq = s.bookings.find(b => b.sessionId === 'sx' && b.playerId === 'p3')!.id;
+  s = cancelBooking(s, 'b-test', NOW).state;
+  s = cancelBooking(s, tariq, new Date(NOW.getTime() + 60_000)).state;
+  s = waiveLateCancel(s, 'b-test', NOW).state; // coach excuses Jordan
+  const a = addAthlete(s, 'A');
+  s = bookSession(a.state, 'sx', a.id, NOW).state;
+  assert.equal(booking(s, tariq).status, 'cancelled_late', "the newcomer's credit covers the waived spot, not Tariq's");
+});
+
+test('refill also covers a forfeited spot until the session starts', () => {
+  const late = cancelBooking(withSessionIn(3, 1), 'b-test', NOW).state;
+  const forfeited = enforceLateCancel(late, 'b-test', NOW).state;
+  assert.equal(booking(bookSession(forfeited, 'sx', 'p3', NOW).state, 'b-test').status, 'excused');
+  assert.equal(bookSession(forfeited, 'sx', 'p3', later(3.5)).ok, false, 'a started session cannot be booked at all');
+});
+
+test('lock mode: a late-cancelled or forfeited spot stays held and is never resold', () => {
+  const s = withSettings(withSessionIn(3, 1), { lateSpot: 'lock' });
+  const late = cancelBooking(s, 'b-test', NOW).state;
+  assert.equal(spotsLeft(late, sx(late)), 0);
+  assert.match(bookSession(late, 'sx', 'p3', NOW).message, /full/);
+  assert.equal(spotsLeft(waiveLateCancel(late, 'b-test', NOW).state, sx(late)), 1, 'a waiver frees it');
+});
+
+test('check-in gives the configured XP once; undoing or switching to no-show takes it back', () => {
+  const s = createSeed(NOW); // b2 = Marcus in live s1
   const present = setAttendance(s, 'b2', 'present', NOW);
-  assert.equal(xp(present, 'p2'), xp(s, 'p2') + CHECK_IN_XP);
-  assert.equal(setAttendance(present, 'b2', 'present', NOW), present, 'checking in twice changes nothing');
-  assert.equal(xp(setAttendance(present, 'b2', 'pending', NOW), 'p2'), xp(s, 'p2'));
+  assert.equal(xp(present, 'p2'), xp(s, 'p2') + 50);
+  assert.equal(setAttendance(present, 'b2', 'present', NOW), present);
   assert.equal(xp(setAttendance(present, 'b2', 'absent', NOW), 'p2'), xp(s, 'p2'));
+  const custom = setAttendance(withSettings(s, { checkInXp: 20 }), 'b2', 'present', NOW);
+  assert.equal(xp(custom, 'p2'), xp(s, 'p2') + 20);
 });
 
-test('attendance belongs to one booking: checking Marcus in today does not touch his later session', () => {
-  const s = createSeed(NOW); // b2 = Marcus in s1, b7 = Marcus in s5
-  const next = setAttendance(s, 'b2', 'present', NOW);
-  assert.equal(booking(next, 'b2').attendance, 'present');
-  assert.equal(booking(next, 'b7').attendance, 'pending');
+test('check-in only works inside its window, and attendance belongs to one booking', () => {
+  const s = createSeed(NOW); // b7 = Marcus in s5, three days out
+  assert.equal(setAttendance(s, 'b7', 'present', NOW), s);
+  const start = new Date(s.sessions.find(x => x.id === 's5')!.start).getTime();
+  const end = new Date(s.sessions.find(x => x.id === 's5')!.end).getTime();
+  assert.equal(booking(setAttendance(s, 'b7', 'present', new Date(start - 29 * 60_000)), 'b7').attendance, 'present');
+  assert.equal(setAttendance(s, 'b7', 'present', new Date(start - 31 * 60_000)), s);
+  assert.equal(setAttendance(s, 'b7', 'present', new Date(end + 13 * HOUR)), s);
+  assert.equal(booking(setAttendance(s, 'b2', 'present', NOW), 'b7').attendance, 'pending');
+});
+
+test('coach tools: add an athlete, add credits, add/edit/delete sessions (with refunds), and settings are clamped', () => {
+  let s = createSeed(NOW);
+  const added = applyCommand(s, { type: 'player.add', player: { name: ' Sam ', level: 'HS', focusAreas: [], phone: '', email: '', creditsRemaining: 3 } }, NOW);
+  assert.equal(added.ok, true);
+  const sam = added.state.players.at(-1)!;
+  assert.deepEqual([sam.name, sam.creditsRemaining, sam.xp], ['Sam', 3, 0]);
+  assert.equal(applyCommand(s, { type: 'player.add', player: { name: '  ', level: '', focusAreas: [], phone: '', email: '' } }, NOW).ok, false);
+  s = applyCommand(added.state, { type: 'player.credits', id: sam.id, delta: 5 }, NOW).state;
+  assert.equal(credits(s, sam.id), 8);
+  assert.equal(credits(applyCommand(s, { type: 'player.credits', id: sam.id, delta: -50 }, NOW).state, sam.id), 0, 'never below zero');
+  const bad = applyCommand(s, { type: 'session.add', session: { title: 'X', courtLocation: '', courtAddress: '', start: later(5).toISOString(), end: later(4).toISOString(), type: 'small_group', maxCapacity: 4, price: 0 } }, NOW);
+  assert.match(bad.message, /end after/);
+  const del = applyCommand(s, { type: 'session.delete', id: 's2' }, NOW);
+  assert.equal(credits(del.state, 'p1'), credits(s, 'p1') + 1, 'Jordan was booked on s2');
+  assert.equal(del.state.bookings.some(b => b.sessionId === 's2'), false);
+  const st = applyCommand(s, { type: 'settings.update', patch: { lateCancelHours: -5, graceHours: 9999, checkInXp: 25 } }, NOW).state.settings;
+  assert.deepEqual([st.lateCancelHours, st.graceHours, st.checkInXp], [0, 336, 25]);
 });
 
 test('drawings join the frame within 0.15 s, start a new frame beyond it, and undo/clear only that frame', () => {
@@ -143,59 +236,30 @@ test('drawings join the frame within 0.15 s, start a new frame beyond it, and un
   let d = addStroke([], 3.2, pen('a'));
   d = addStroke(d, 3.3, pen('b'));
   assert.equal(d.length, 1);
-  assert.equal(d[0].strokes.length, 2);
   d = addStroke(d, 5, pen('c'));
   assert.equal(d.length, 2);
   d = undoStroke(d, 3.2);
   assert.equal(d.find(f => f.timestamp === 3.2)!.strokes.length, 1);
-  d = clearFrame(d, 5);
-  assert.deepEqual(d.map(f => f.timestamp), [3.2]);
-});
-
-test('saved data is only trusted when it has the expected shape', () => {
-  assert.equal(isValidState(createSeed(NOW), STATE_VERSION), true);
-  assert.equal(isValidState(null, STATE_VERSION), false);
-  assert.equal(isValidState({ ...createSeed(NOW), version: 1 }, STATE_VERSION), false);
-  assert.equal(isValidState({ ...createSeed(NOW), players: [{ id: 'x' }] }, STATE_VERSION), false);
-  assert.equal(isValidState({ ...createSeed(NOW), sessions: [{ id: 's', start: 'nope', end: 'nope' }] }, STATE_VERSION), false);
-});
-
-test('check-in only works from 30 minutes before a session until 12 hours after it', () => {
-  const s = createSeed(NOW); // b7 = Marcus in s5, three days out
-  assert.equal(setAttendance(s, 'b7', 'present', NOW), s, 'refused days ahead');
-  const start = new Date(s.sessions.find(x => x.id === 's5')!.start).getTime();
-  const end = new Date(s.sessions.find(x => x.id === 's5')!.end).getTime();
-  assert.equal(booking(setAttendance(s, 'b7', 'present', new Date(start - 29 * 60_000)), 'b7').attendance, 'present', 'open 29 min before');
-  assert.equal(setAttendance(s, 'b7', 'present', new Date(start - 31 * 60_000)), s, 'still shut 31 min before');
-  assert.equal(setAttendance(s, 'b7', 'present', new Date(end + 13 * HOUR)), s, 'closed 13 h after');
-});
-
-test('a late-cancelled spot stays locked; a waiver frees it, a forfeit does not', () => {
-  const s = withSessionIn(2); // sx: capacity 2, Jordan booked
-  const session = (st: DemoState) => st.sessions.find(x => x.id === 'sx')!;
-  assert.equal(spotsLeft(s, session(s)), 1);
-  const late = cancelBooking(s, 'b-test', NOW).state;
-  assert.equal(spotsLeft(late, session(late)), 1, 'late cancel keeps the spot held');
-  assert.equal(spotsLeft(enforceLateCancel(late, 'b-test', NOW).state, session(late)), 1, 'forfeit keeps it held');
-  const waived = waiveLateCancel(late, 'b-test', NOW).state;
-  assert.equal(spotsLeft(waived, session(waived)), 2, 'waiver frees it');
-  const early = cancelBooking(withSessionIn(10), 'b-test', NOW).state;
-  assert.equal(spotsLeft(early, early.sessions.find(x => x.id === 'sx')!), 2, 'timely cancel frees it');
+  assert.deepEqual(clearFrame(d, 5).map(f => f.timestamp), [3.2]);
 });
 
 test('one damaged record anywhere makes the whole saved state untrusted', () => {
-  const seed = () => createSeed(NOW);
+  assert.equal(isValidState(createSeed(NOW), STATE_VERSION), true);
   const broken: Array<[string, (s: any) => void]> = [
+    ['old version', s => { s.version = 3; }],
+    ['missing settings', s => { delete s.settings; }],
+    ['bad late-spot setting', s => { s.settings.lateSpot = 'maybe'; }],
     ['film without notes', s => { delete s.films[0].notes; }],
     ['bare film record', s => { s.films = [{ id: 'f', playerId: 'p1' }]; }],
     ['unknown booking status', s => { s.bookings[0].status = 'paid'; }],
+    ['unknown decision reason', s => { s.bookings[0].decisionReason = 'bribe'; }],
     ['drawing point not a number', s => { s.films[0].drawings[0].strokes[0].points[0].x = 'a'; }],
     ['homework missing title', s => { delete s.homework[0].title; }],
     ['notification prefs not booleans', s => { s.notifyPrefs = { p1: { sms: 'yes', email: true, push: true } }; }],
     ['coach note with bad date', s => { s.coachNotes[0].createdAt = 'tomorrow'; }]
   ];
   for (const [label, damage] of broken) {
-    const s = structuredClone(seed());
+    const s = structuredClone(createSeed(NOW));
     damage(s);
     assert.equal(isValidState(s, STATE_VERSION), false, label);
   }

@@ -4,9 +4,13 @@ import {
   Undo2, Upload, Pencil, AlertTriangle, StopCircle
 } from 'lucide-react';
 import type { DrawTool, FilmReview, Point, Stroke } from '../types';
-import type { DemoStore } from '../store';
-import { addStroke, clearFrame, findFrame, undoStroke, uid } from '../logic';
-import { deleteMedia, getMedia, MAX_VIDEO_BYTES, putMedia } from '../media';
+import type { AppStore } from '../store';
+import { findFrame, uid } from '../logic';
+import { now as clockNow } from '../clock';
+import { pageUrl } from '../router';
+
+/** Sample clips are stored relative to the site root; pages live in sub-folders (/coach/, /athlete/). */
+const resolveClip = (u: string) => (/^(https?:|blob:|data:)/.test(u) ? u : pageUrl('') + u.replace(/^\.\//, ''));
 import { formatSecs, useNow } from '../format';
 import { AthletePicker } from './ui';
 
@@ -20,7 +24,7 @@ const COLORS = [
 ];
 
 interface FilmBreakdownStudioProps {
-  store: DemoStore;
+  store: AppStore;
   mode: 'coach' | 'athlete';
   athleteId: string;
   onAthleteChange?: (id: string) => void;
@@ -70,7 +74,10 @@ type FeedItem =
   | { kind: 'drawing'; id: string; t: number; count: number };
 
 export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store, mode, athleteId, onAthleteChange }) => {
-  const { state, update } = store;
+  const { state, dispatch, backend } = store;
+  const media = backend.media;
+  // Demo clips stay in this browser (up to 300 MB); the free Supabase plan takes files up to 50 MB.
+  const MAX_VIDEO_BYTES = (backend.kind === 'supabase' ? 50 : 300) * 1024 * 1024;
   const isCoach = mode === 'coach';
   const athlete = state.players.find(p => p.id === athleteId) ?? state.players[0];
   const films = state.films.filter(f => f.playerId === athlete?.id);
@@ -98,14 +105,12 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
   const boxRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const draft = useRef<{ stroke: Stroke; time: number } | null>(null);
+  /** A finished stroke still being saved: drawn until the saved copy arrives, so slow connections don't flicker. */
+  const pending = useRef<{ stroke: Stroke; time: number } | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordTimer = useRef<number | null>(null);
   const audioRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
 
-  const updateFilm = useCallback(
-    (id: string, fn: (f: FilmReview) => FilmReview) => update(s => ({ ...s, films: s.films.map(f => (f.id === id ? fn(f) : f)) })),
-    [update]
-  );
 
   // A new athlete starts on their first film.
   useEffect(() => setSelectedFilmId(null), [athleteId]);
@@ -121,7 +126,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
       return;
     }
     if (film.videoUrl) {
-      setVideoSrc(film.videoUrl);
+      setVideoSrc(resolveClip(film.videoUrl));
       return;
     }
     if (!film.videoKey) {
@@ -131,7 +136,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     let cancelled = false;
     let url: string | undefined;
     setVideoSrc(undefined);
-    getMedia(film.videoKey)
+    media.get(film.videoKey)
       .then(blob => {
         if (cancelled) return;
         if (!blob) {
@@ -181,6 +186,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     visibleFrame?.strokes.forEach(s => drawStroke(ctx, s, width, height));
+    if (pending.current && !visibleFrame?.strokes.some(st => st.id === pending.current!.stroke.id)) drawStroke(ctx, pending.current.stroke, width, height);
     if (draft.current) drawStroke(ctx, draft.current.stroke, width, height);
     // filmId: the video box mounts when the first film appears, so sizing must re-run then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -265,7 +271,11 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     const big = d.stroke.tool === 'pen' ? d.stroke.points.length > 1 : b && Math.hypot(b.x - a.x, b.y - a.y) > 0.01;
     if (big) {
       setCurrentTime(d.time);
-      updateFilm(film.id, f => ({ ...f, drawings: addStroke(f.drawings, d.time, d.stroke) }));
+      pending.current = d;
+      void dispatch({ type: 'film.stroke.add', filmId: film.id, time: d.time, stroke: d.stroke }).finally(() => {
+        pending.current = null;
+        redraw();
+      });
     } else {
       redraw();
     }
@@ -276,7 +286,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     const text = newNoteText.trim();
     if (!text || !film) return;
     const t = Math.round((videoRef.current?.currentTime ?? currentTime) * 10) / 10;
-    updateFilm(film.id, f => ({ ...f, notes: [...f.notes, { id: uid('n'), timestamp: t, text, author: 'Coach' }].sort((a, b) => a.timestamp - b.timestamp) }));
+    void dispatch({ type: 'film.note.add', filmId: film.id, note: { timestamp: t, text, author: 'Coach' } });
     setNewNoteText('');
   };
 
@@ -297,6 +307,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     pause();
     const at = Math.round((videoRef.current?.currentTime ?? currentTime) * 10) / 10;
     const forFilm = film.id;
+    const forPlayer = film.playerId;
     const chunks: Blob[] = [];
     const rec = new MediaRecorder(mic);
     const startedAt = Date.now();
@@ -312,10 +323,10 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
         setMediaError('Nothing was recorded.');
         return;
       }
-      const key = uid('vm');
+      const key = `memos/${forPlayer}/${uid('vm')}`;
       try {
-        await putMedia(key, blob);
-        updateFilm(forFilm, f => ({ ...f, voiceNotes: [...f.voiceNotes, { id: uid('v'), timestamp: at, duration: seconds, mediaKey: key }] }));
+        await media.put(key, blob);
+        await dispatch({ type: 'film.memo.add', filmId: forFilm, memo: { timestamp: at, duration: seconds, mediaKey: key } });
       } catch {
         setMediaError('The memo could not be saved. This browser may be out of storage.');
       }
@@ -345,7 +356,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     seekTo(t);
     setMediaError(null);
     try {
-      const blob = await getMedia(mediaKey);
+      const blob = await media.get(mediaKey);
       if (!blob) {
         setMediaError('This memo was recorded in a different browser, or the browser cleared it.');
         return;
@@ -365,13 +376,13 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
   const deleteMemo = (id: string, mediaKey: string) => {
     if (!film || !window.confirm('Delete this voice memo?')) return;
     if (playingMemo === id) stopMemo();
-    void deleteMedia(mediaKey).catch(() => undefined);
-    updateFilm(film.id, f => ({ ...f, voiceNotes: f.voiceNotes.filter(v => v.id !== id) }));
+    void media.remove(mediaKey).catch(() => undefined);
+    void dispatch({ type: 'film.memo.delete', filmId: film.id, memoId: id });
   };
 
   const deleteNote = (id: string) => {
     if (!film || !window.confirm('Delete this note?')) return;
-    void updateFilm(film.id, f => ({ ...f, notes: f.notes.filter(n => n.id !== id) }));
+    void dispatch({ type: 'film.note.delete', filmId: film.id, noteId: id });
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -384,27 +395,27 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
       return;
     }
     if (file.size > MAX_VIDEO_BYTES) {
-      setMediaError(`That clip is ${Math.round(file.size / 1048576)} MB. The demo keeps clips up to ${MAX_VIDEO_BYTES / 1048576} MB; trim it first.`);
+      setMediaError(`That clip is ${Math.round(file.size / 1048576)} MB. Clips can be up to ${MAX_VIDEO_BYTES / 1048576} MB here; trim it first.`);
       return;
     }
     setUploading(true);
-    const key = uid('vid');
+    const key = `films/${athlete.id}/${uid('vid')}`;
     try {
-      await putMedia(key, file);
+      await media.put(key, file);
       const review: FilmReview = {
         id: uid('f'),
         playerId: athlete.id,
         title: file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Game film',
         videoKey: key,
-        uploadedAt: new Date().toISOString(),
+        uploadedAt: clockNow().toISOString(),
         notes: [],
         voiceNotes: [],
         drawings: []
       };
-      update(s => ({ ...s, films: [review, ...s.films] }));
-      setSelectedFilmId(review.id);
+      const saved = await dispatch({ type: 'film.add', film: review });
+      if (saved.ok) setSelectedFilmId(review.id);
     } catch {
-      setMediaError('The clip could not be saved. This browser may be out of storage.');
+      setMediaError(backend.kind === 'supabase' ? 'The clip could not be uploaded. Check the connection and the 1 GB free storage limit.' : 'The clip could not be saved. This browser may be out of storage.');
     } finally {
       setUploading(false);
     }
@@ -413,9 +424,9 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
   const deleteFilm = () => {
     if (!film || !window.confirm(`Delete “${film.title}” with all its notes, drawings and voice memos?`)) return;
     stopMemo();
-    if (film.videoKey) void deleteMedia(film.videoKey).catch(() => undefined);
-    film.voiceNotes.forEach(v => void deleteMedia(v.mediaKey).catch(() => undefined));
-    update(s => ({ ...s, films: s.films.filter(f => f.id !== film.id) }));
+    if (film.videoKey) void media.remove(film.videoKey).catch(() => undefined);
+    film.voiceNotes.forEach(v => void media.remove(v.mediaKey).catch(() => undefined));
+    void dispatch({ type: 'film.delete', filmId: film.id });
     setSelectedFilmId(null);
   };
 
@@ -560,7 +571,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                     </button>
                   ))}
                   <button
-                    onClick={() => updateFilm(film.id, f => ({ ...f, drawings: undoStroke(f.drawings, currentTime) }))}
+                    onClick={() => void dispatch({ type: 'film.stroke.undo', filmId: film.id, time: currentTime })}
                     disabled={!visibleFrame}
                     aria-label="Undo last drawing on this frame"
                     title="Undo"
@@ -569,7 +580,7 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                     <Undo2 className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => updateFilm(film.id, f => ({ ...f, drawings: clearFrame(f.drawings, currentTime) }))}
+                    onClick={() => void dispatch({ type: 'film.frame.clear', filmId: film.id, time: currentTime })}
                     disabled={!visibleFrame}
                     aria-label="Clear drawings on this frame"
                     title="Clear this frame"

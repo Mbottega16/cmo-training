@@ -9,6 +9,7 @@ export interface Player {
   xp: number;
   phone: string;
   email: string;
+  inviteCode?: string; // backend only: the code an athlete enters once to link their account
 }
 
 export type SessionType = 'one_on_one' | 'small_group' | 'virtual_live';
@@ -44,7 +45,10 @@ export interface Booking {
   cancelledAt?: string;
   graceExpiresAt?: string;
   hoursNoticeAtCancel?: number;
+  /** Confirmed bookings in the session (including this one) when it was late-cancelled. */
+  confirmedAtCancel?: number;
   decidedAt?: string;
+  decisionReason?: 'coach' | 'expired' | 'refilled';
 }
 
 export interface HomeworkAssignment {
@@ -118,6 +122,18 @@ export interface NotifyPrefs {
   push: boolean;
 }
 
+/** Rules the coach (or the owner on the dev page) can tune. */
+export interface Settings {
+  lateCancelHours: number; // cancel at least this long before: credit back
+  graceHours: number; // a late cancel's credit is held this long while the coach decides
+  /** 'refill': a late-cancelled spot can be booked again, and if the session fills back up the canceller gets the credit back.
+   *  'lock': the spot stays empty and the credit rules run as normal. */
+  lateSpot: 'refill' | 'lock';
+  checkInXp: number;
+  checkInOpensMinutes: number;
+  checkInClosesHours: number;
+}
+
 export interface DemoState {
   version: number;
   seededAt: string;
@@ -128,4 +144,7 @@ export interface DemoState {
   films: FilmReview[];
   coachNotes: CoachNote[];
   notifyPrefs: Record<string, NotifyPrefs>;
+  settings: Settings;
+  /** Backend only: spots left per session, because athletes can't see other athletes' bookings. */
+  spotCounts?: Record<string, number>;
 }

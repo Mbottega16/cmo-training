@@ -1,5 +1,5 @@
 import React from 'react';
-import { wipeSavedData } from '../store';
+import { wipeSavedData } from '../backend/local';
 
 interface State {
   failed: boolean;

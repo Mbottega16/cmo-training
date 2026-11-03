@@ -1,27 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Video, VideoOff, Mic, MicOff, PhoneOff, MessageSquare, Copy, Check, Radio, Send, AlertTriangle, Link2 } from 'lucide-react';
-import type { DemoStore } from '../store';
-import { sessionPhase, uid } from '../logic';
+import type { AppStore } from '../store';
+import { sessionPhase } from '../logic';
 import { formatAgo, formatSessionTime, useNow } from '../format';
+import { Call, type CallStatus } from '../rtc';
 import { AthletePicker, Avatar } from './ui';
 
 interface VirtualMeetingRoomProps {
-  store: DemoStore;
+  store: AppStore;
   mode: 'coach' | 'athlete';
   athleteId: string;
   onAthleteChange?: (id: string) => void;
+  /** Where the athlete joins this room (the athlete page). */
+  inviteLink?: string;
 }
 
 function cameraErrorMessage(err: unknown): string {
   const name = err instanceof DOMException ? err.name : '';
-  if (name === 'NotAllowedError') return 'Camera or microphone permission was denied. Allow it in the browser settings and try again.';
-  if (name === 'NotFoundError') return 'No camera or microphone was found on this device.';
+  if (name === 'NotAllowedError') return 'Camera or microphone permission was denied. You can still see and hear the other person; allow access in the browser settings to be seen.';
+  if (name === 'NotFoundError') return 'No camera or microphone was found. You can still see and hear the other person.';
   if (name === 'NotReadableError') return 'The camera is in use by another app.';
   return 'The camera could not start.';
-}
-
-function inviteLink(athleteId: string): string {
-  return `${window.location.origin}${window.location.pathname}#/athlete/${athleteId}/room`;
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -31,7 +30,7 @@ async function copyText(text: string): Promise<boolean> {
       return true;
     }
   } catch {
-    // fall through to the old way
+    // fall through
   }
   const area = document.createElement('textarea');
   area.value = text;
@@ -50,35 +49,55 @@ async function copyText(text: string): Promise<boolean> {
   return ok;
 }
 
-export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, mode, athleteId, onAthleteChange }) => {
-  const { state, update } = store;
+const STATUS_TEXT: Record<CallStatus, string> = {
+  waiting: 'Waiting for the other person',
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  unreachable: "Can't connect",
+  ended: 'Not in the room'
+};
+
+export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, mode, athleteId, onAthleteChange, inviteLink }) => {
+  const { state, dispatch, backend } = store;
   const athlete = state.players.find(p => p.id === athleteId) ?? state.players[0];
   const now = useNow(1000);
 
   const [inCall, setInCall] = useState(false);
   const [callStart, setCallStart] = useState<number | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [local, setLocal] = useState<MediaStream | null>(null);
+  const [remote, setRemote] = useState<MediaStream | null>(null);
+  const [status, setStatus] = useState<CallStatus>('ended');
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [newNote, setNewNote] = useState('');
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const localRef = useRef<HTMLVideoElement>(null);
+  const remoteRef = useRef<HTMLVideoElement>(null);
+  const callRef = useRef<Call | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const stopStream = () => {
+  const hangUp = () => {
+    callRef.current?.leave();
+    callRef.current = null;
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
-    setStream(null);
+    setLocal(null);
+    setRemote(null);
+    setInCall(false);
+    setCallStart(null);
+    setStatus('ended');
   };
 
-  // Leaving the tab mid-call must turn the camera and mic off.
-  useEffect(() => () => streamRef.current?.getTracks().forEach(t => t.stop()), []);
+  // Leaving the screen, or switching athlete, ends the call and turns the camera and mic off.
+  useEffect(() => hangUp, [athleteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The video element stays mounted during a call; re-attach whenever the stream changes.
   useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = stream;
-  }, [stream, inCall]);
+    if (localRef.current) localRef.current.srcObject = local;
+  }, [local, inCall]);
+  useEffect(() => {
+    if (remoteRef.current) remoteRef.current.srcObject = remote;
+  }, [remote]);
 
   if (!athlete) return null;
 
@@ -90,29 +109,27 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
     .filter((s): s is NonNullable<typeof s> => Boolean(s) && s!.type === 'virtual_live' && sessionPhase(s!, now) !== 'ended')
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
 
-  const startMeeting = async () => {
+  const join = async () => {
     setCamError(null);
     setIsMuted(false);
     setIsVideoOff(false);
+    let media = new MediaStream();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamError('This page needs a secure (https) address to use the camera. You can still see and hear the other person.');
+    } else {
+      try {
+        media = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch (err) {
+        setCamError(cameraErrorMessage(err));
+      }
+    }
+    streamRef.current = media;
+    setLocal(media);
     setInCall(true);
     setCallStart(Date.now());
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCamError('This page needs a secure (https) address to use the camera. It works on localhost and on the hosted site.');
-      return;
-    }
-    try {
-      const media = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      streamRef.current = media;
-      setStream(media);
-    } catch (err) {
-      setCamError(cameraErrorMessage(err));
-    }
-  };
-
-  const endMeeting = () => {
-    stopStream();
-    setInCall(false);
-    setCallStart(null);
+    const call = new Call(backend, athlete.id, media, setRemote, setStatus);
+    callRef.current = call;
+    call.start();
   };
 
   const toggleMic = () => {
@@ -128,7 +145,8 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
   };
 
   const handleCopy = async () => {
-    const ok = await copyText(inviteLink(athlete.id));
+    if (!inviteLink) return;
+    const ok = await copyText(inviteLink);
     setCopyState(ok ? 'copied' : 'failed');
     window.setTimeout(() => setCopyState('idle'), 4000);
   };
@@ -137,13 +155,15 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
     e.preventDefault();
     const text = newNote.trim();
     if (!text) return;
-    update(s => ({ ...s, coachNotes: [...s.coachNotes, { id: uid('c'), playerId: athlete.id, text, createdAt: new Date().toISOString() }] }));
+    void dispatch({ type: 'coachNote.add', playerId: athlete.id, text });
     setNewNote('');
   };
 
   const elapsed = callStart ? Math.max(0, Math.floor((now.getTime() - callStart) / 1000)) : 0;
   const timer = `${Math.floor(elapsed / 60).toString().padStart(2, '0')}:${(elapsed % 60).toString().padStart(2, '0')}`;
-  const showOwnVideo = inCall && stream && !isVideoOff;
+  const hasOwnVideo = Boolean(local && local.getVideoTracks().length > 0 && !isVideoOff);
+  const connected = status === 'connected' && remote;
+  const across = backend.kind === 'supabase' ? `${otherName} joins from their own phone or computer.` : `In the demo, ${otherName} joins from another tab of this browser (open the invite link there).`;
 
   return (
     <div className="space-y-4">
@@ -151,40 +171,43 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-lg font-bold text-white">CMO Video Room</h2>
-            <span className="text-[11px] bg-brand-surface border border-brand-border px-2 py-0.5 rounded text-slate-300">Demo: your camera only</span>
+            <span
+              role="status"
+              className={`text-[11px] border px-2 py-0.5 rounded ${
+                status === 'connected' ? 'bg-brand-success/20 border-brand-green/50 text-green-200' : status === 'unreachable' ? 'bg-red-500/10 border-red-500/40 text-red-200' : 'bg-brand-surface border-brand-border text-slate-300'
+              }`}
+            >
+              {STATUS_TEXT[status]}
+            </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
             {mode === 'coach' ? (
               <>
-                Private 1-on-1 with <span className="text-white font-medium">{athlete.name}</span> ({athlete.level})
+                Private 1-on-1 with <span className="text-white font-medium">{athlete.name}</span>
               </>
             ) : (
               <>Your private video session with Coach</>
             )}
+            {' · '}
+            {across}
           </p>
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
           {mode === 'coach' && onAthleteChange && <AthletePicker players={state.players} value={athlete.id} onChange={onAthleteChange} />}
-          {mode === 'coach' && (
-            <button
-              onClick={handleCopy}
-              className="min-h-[44px] text-xs bg-brand-surface border border-brand-border hover:border-slate-500 text-slate-300 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5"
-            >
+          {mode === 'coach' && inviteLink && (
+            <button onClick={handleCopy} className="min-h-[44px] text-xs bg-brand-surface border border-brand-border hover:border-slate-500 text-slate-300 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5">
               {copyState === 'copied' ? <Check className="w-3.5 h-3.5 text-brand-green" /> : <Copy className="w-3.5 h-3.5" />}
               {copyState === 'copied' ? 'Link copied' : copyState === 'failed' ? 'Copy failed: see link below' : 'Copy invite link'}
             </button>
           )}
           {!inCall ? (
-            <button
-              onClick={startMeeting}
-              className="min-h-[44px] text-xs font-semibold bg-brand-action hover:bg-brand-actionHover text-white px-4 py-2 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-brand-orange/20"
-            >
+            <button onClick={join} className="min-h-[44px] text-xs font-semibold bg-brand-action hover:bg-brand-actionHover text-white px-4 py-2 rounded-xl flex items-center justify-center gap-2">
               <Radio className="w-4 h-4" />
               {mode === 'coach' ? 'Open the room' : 'Join the room'}
             </button>
           ) : (
-            <button onClick={endMeeting} className="min-h-[44px] text-xs font-semibold bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl flex items-center justify-center gap-2">
+            <button onClick={hangUp} className="min-h-[44px] text-xs font-semibold bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl flex items-center justify-center gap-2">
               <PhoneOff className="w-4 h-4" />
               Leave
             </button>
@@ -192,10 +215,10 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
         </div>
       </div>
 
-      {mode === 'coach' && copyState === 'failed' && (
+      {mode === 'coach' && inviteLink && copyState === 'failed' && (
         <div className="bg-brand-surface border border-brand-border rounded-xl p-3 text-xs flex items-center gap-2">
           <Link2 className="w-4 h-4 text-slate-400 shrink-0" />
-          <input readOnly value={inviteLink(athlete.id)} onFocus={e => e.currentTarget.select()} className="flex-1 bg-transparent text-slate-200 outline-none" aria-label="Invite link" />
+          <input readOnly value={inviteLink} onFocus={e => e.currentTarget.select()} className="flex-1 bg-transparent text-slate-200 outline-none" aria-label="Invite link" />
         </div>
       )}
 
@@ -204,23 +227,30 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
           <div className="relative aspect-video bg-black flex items-center justify-center">
             {inCall ? (
               <>
-                <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover -scale-x-100 ${showOwnVideo ? '' : 'hidden'}`} />
-                {!showOwnVideo && (
-                  <div className="flex flex-col items-center justify-center text-slate-400 p-6 text-center">
-                    <div className="w-20 h-20 rounded-full bg-brand-surface border border-brand-border flex items-center justify-center text-xl font-bold text-white mb-2">
-                      {mode === 'coach' ? 'CMO' : <Avatar player={athlete} />}
-                    </div>
-                    <p className="text-xs">{camError ? 'Camera off' : isVideoOff ? 'Your video is off' : 'Starting camera…'}</p>
+                <video ref={remoteRef} autoPlay playsInline aria-label={`${otherName}'s camera`} className={`absolute inset-0 w-full h-full object-cover ${connected ? '' : 'hidden'}`} />
+                <video
+                  ref={localRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  aria-label="Your camera"
+                  className={`object-cover -scale-x-100 transition ${hasOwnVideo ? '' : 'hidden'} ${
+                    connected ? 'absolute bottom-3 right-3 w-28 sm:w-44 aspect-video rounded-xl border-2 border-white/30 shadow-2xl z-10' : 'w-full h-full'
+                  }`}
+                />
+                {!connected && (
+                  <div className={`${hasOwnVideo ? 'absolute top-3 right-3 w-44 sm:w-52' : 'relative w-64'} rounded-xl border-2 border-dashed border-brand-orange/60 bg-brand-dark/90 p-3 text-center`}>
+                    {!hasOwnVideo && (
+                      <div className="w-14 h-14 mx-auto mb-2 rounded-full bg-brand-surface border border-brand-border flex items-center justify-center text-sm font-bold text-white">
+                        {mode === 'coach' ? 'CMO' : <Avatar player={athlete} size="sm" />}
+                      </div>
+                    )}
+                    <p className="text-[11px] text-white font-medium">{otherName}</p>
+                    <p className="text-[10px] text-slate-300 mt-0.5">{status === 'unreachable' ? "Can't connect on this network" : status === 'connecting' ? 'Connecting…' : 'Not here yet'}</p>
                   </div>
                 )}
-
-                <div className="absolute top-3 right-3 w-36 sm:w-48 aspect-video rounded-xl overflow-hidden border-2 border-dashed border-brand-orange/60 bg-brand-dark/90 flex flex-col items-center justify-center p-2 text-center">
-                  <span className="text-[11px] text-white font-medium">{otherName}</span>
-                  <span className="text-[10px] text-slate-400 mt-0.5">Waiting to join…</span>
-                </div>
-
-                <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-mono text-white flex items-center gap-1.5 border border-white/10">
-                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-mono text-white flex items-center gap-1.5 border border-white/10 z-20">
+                  <span className={`w-2 h-2 rounded-full ${connected ? 'bg-brand-green' : 'bg-red-500'}`} />
                   {timer}
                 </div>
               </>
@@ -230,22 +260,26 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                   <Video className="w-7 h-7" />
                 </div>
                 <h3 className="text-base font-bold text-white mb-1">Room ready</h3>
-                <p className="text-xs text-slate-400">No Zoom or Meet account needed. In this demo you'll see your own camera; {otherName} can't join yet.</p>
+                <p className="text-xs text-slate-300">No Zoom or Meet account needed. The video goes straight between your two devices.</p>
               </div>
             )}
           </div>
 
-          {camError && (
+          {(camError || status === 'unreachable') && (
             <div className="px-4 py-3 bg-brand-orange/10 border-t border-brand-orange/30 text-xs text-orange-200 flex items-start gap-2" role="alert">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              {camError}
+              <span>
+                {camError}
+                {status === 'unreachable' &&
+                  ` ${camError ? ' ' : ''}The two devices couldn't reach each other directly. This happens on some strict mobile or office networks; try Wi-Fi on both sides.`}
+              </span>
             </div>
           )}
 
           <div className="p-3 bg-brand-surface border-t border-brand-border flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <button
-                disabled={!inCall || !stream}
+                disabled={!inCall || !local?.getAudioTracks().length}
                 onClick={toggleMic}
                 aria-pressed={isMuted}
                 aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
@@ -256,7 +290,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                 {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </button>
               <button
-                disabled={!inCall || !stream}
+                disabled={!inCall || !local?.getVideoTracks().length}
                 onClick={toggleVideo}
                 aria-pressed={isVideoOff}
                 aria-label={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
@@ -267,9 +301,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                 {isVideoOff ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
               </button>
             </div>
-            <div className="text-[11px] text-slate-400 text-right">
-              {inCall ? 'Live calls with a second person turn on when the video service is connected.' : 'Standby'}
-            </div>
+            <div className="text-[11px] text-slate-400 text-right">{inCall ? STATUS_TEXT[status] : 'Standby'}</div>
           </div>
         </div>
 
@@ -281,7 +313,7 @@ export const VirtualMeetingRoom: React.FC<VirtualMeetingRoomProps> = ({ store, m
                   <MessageSquare className="w-4 h-4 text-brand-orange" />
                   <h3 className="text-sm font-bold text-white">Coaching notes</h3>
                 </div>
-                <span className="text-[10px] text-slate-400">Saved to {athlete.name.split(' ')[0]}'s file</span>
+                <span className="text-[10px] text-slate-400">Private to coaches</span>
               </div>
               <div className="space-y-2 max-h-64 sm:max-h-80 overflow-y-auto overscroll-contain pr-1 text-xs">
                 {coachNotes.length === 0 && <p className="text-slate-400">No notes yet.</p>}
