@@ -46,8 +46,8 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
     return session ? sessionPhase(session, now) === 'upcoming' : false;
   });
 
-  const act = (fn: typeof waiveLateCancel, bookingId: string, tone: ToastTone) => {
-    const result = run(s => fn(s, bookingId, new Date()));
+  const act = async (fn: typeof waiveLateCancel, bookingId: string, tone: ToastTone) => {
+    const result = await run(s => fn(s, bookingId, new Date()));
     setToast({ message: result.message, tone: result.ok ? tone : 'bad' });
   };
 
@@ -156,8 +156,8 @@ export const CancellationEngine: React.FC<{ store: DemoStore }> = ({ store }) =>
                 </div>
               </div>
               <button
-                onClick={() => {
-                  const result = run(s => cancelBooking(s, b.id, new Date()));
+                onClick={async () => {
+                  const result = await run(s => cancelBooking(s, b.id, new Date()));
                   setToast({ message: result.message, tone: result.ok ? (preview.kind === 'early' ? 'good' : 'warn') : 'bad' });
                 }}
                 className="min-h-[44px] px-4 py-2 rounded-xl bg-brand-card border border-brand-border hover:border-brand-orange text-slate-200 font-semibold"

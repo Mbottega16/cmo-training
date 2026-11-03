@@ -47,8 +47,28 @@ export function confirmedBookings(state: DemoState, sessionId: string): Booking[
   return state.bookings.filter(b => b.sessionId === sessionId && b.status === 'confirmed');
 }
 
+/**
+ * A late cancel keeps the court time locked (the policy: "late cancellations lock court time"), so its spot is not
+ * resold while the athlete's credit is held or after it is used. Only a timely cancel or a coach waiver frees it.
+ */
+export function holdsSpot(b: Booking): boolean {
+  return b.status === 'confirmed' || b.status === 'cancelled_late' || b.status === 'forfeited';
+}
+
 export function spotsLeft(state: DemoState, session: TrainingSession): number {
-  return session.maxCapacity - confirmedBookings(state, session.id).length;
+  return session.maxCapacity - state.bookings.filter(b => b.sessionId === session.id && holdsSpot(b)).length;
+}
+
+/** Check-in opens shortly before a session and closes a while after it, so XP can't be given for future sessions. */
+export const CHECK_IN_OPENS_MINUTES = 30;
+export const CHECK_IN_CLOSES_HOURS = 12;
+
+export function attendanceWindow(session: TrainingSession, now: Date): 'early' | 'open' | 'closed' {
+  const opens = new Date(session.start).getTime() - CHECK_IN_OPENS_MINUTES * 60_000;
+  const closes = new Date(session.end).getTime() + CHECK_IN_CLOSES_HOURS * HOUR;
+  const n = now.getTime();
+  if (n < opens) return 'early';
+  return n <= closes ? 'open' : 'closed';
 }
 
 /** What a cancel right now would mean, before the athlete confirms it. */
@@ -154,10 +174,15 @@ export function expireGraceWindows(state: DemoState, now: Date): DemoState {
   };
 }
 
-/** Check-in, no-show, or back to pending. Check-in earns XP; undoing it takes the XP back. */
-export function setAttendance(state: DemoState, bookingId: string, attendance: Booking['attendance']): DemoState {
+/**
+ * Check-in, no-show, or back to pending, only while the session's check-in window is open.
+ * Check-in earns XP; undoing it takes the XP back.
+ */
+export function setAttendance(state: DemoState, bookingId: string, attendance: Booking['attendance'], now: Date): DemoState {
   const booking = state.bookings.find(b => b.id === bookingId);
   if (!booking || booking.status !== 'confirmed' || booking.attendance === attendance) return state;
+  const session = state.sessions.find(s => s.id === booking.sessionId);
+  if (!session || attendanceWindow(session, now) !== 'open') return state;
   const xpDelta = (attendance === 'present' ? CHECK_IN_XP : 0) - (booking.attendance === 'present' ? CHECK_IN_XP : 0);
   const next = updateBooking(state, bookingId, { attendance });
   return {
@@ -207,21 +232,41 @@ export function clearFrame(drawings: DrawingFrame[], time: number): DrawingFrame
   return frame ? drawings.filter(f => f.id !== frame.id) : drawings;
 }
 
-/** A saved state is only trusted if it has the shape this version expects. */
+// ---- Saved-data checks: every record the screens read is checked, so damaged data is replaced, not rendered. ----
+type Rec = Record<string, unknown>;
+const isObj = (x: unknown): x is Rec => typeof x === 'object' && x !== null && !Array.isArray(x);
+const str = (x: unknown) => typeof x === 'string';
+const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
+const bool = (x: unknown) => typeof x === 'boolean';
+const date = (x: unknown) => typeof x === 'string' && !Number.isNaN(Date.parse(x));
+const optDate = (x: unknown) => x === undefined || date(x);
+const strings = (x: unknown) => Array.isArray(x) && x.every(str);
+const list = (x: unknown, ok: (r: Rec) => boolean) => Array.isArray(x) && x.every(r => isObj(r) && ok(r));
+
+const BOOKING_STATUSES = ['confirmed', 'cancelled_early', 'cancelled_late', 'excused', 'forfeited'];
+const ATTENDANCE = ['pending', 'present', 'absent'];
+const SESSION_TYPES = ['one_on_one', 'small_group', 'virtual_live'];
+const TOOLS = ['pen', 'arrow', 'circle'];
+const point = (p: unknown) => isObj(p) && num(p.x) && num(p.y);
+
+/** A saved state is only trusted if every record has the shape this version expects. */
 export function isValidState(value: unknown, version: number): value is DemoState {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Partial<DemoState>;
+  if (!isObj(value) || value.version !== version || !date(value.seededAt)) return false;
+  const v = value;
   return (
-    v.version === version &&
-    Array.isArray(v.players) &&
-    Array.isArray(v.sessions) &&
-    Array.isArray(v.bookings) &&
-    Array.isArray(v.homework) &&
-    Array.isArray(v.films) &&
-    Array.isArray(v.coachNotes) &&
-    typeof v.notifyPrefs === 'object' &&
-    v.notifyPrefs !== null &&
-    v.players.every(p => p && typeof p.id === 'string' && typeof p.name === 'string' && typeof p.creditsRemaining === 'number' && typeof p.xp === 'number') &&
-    v.sessions.every(s => s && typeof s.id === 'string' && !Number.isNaN(Date.parse(s.start)) && !Number.isNaN(Date.parse(s.end)))
+    list(v.players, p => str(p.id) && str(p.name) && str(p.level) && strings(p.focusAreas) && num(p.creditsRemaining) && num(p.xp) && str(p.phone) && str(p.email)) &&
+    list(v.sessions, s => str(s.id) && str(s.title) && str(s.courtLocation) && str(s.courtAddress) && date(s.start) && date(s.end) && SESSION_TYPES.includes(s.type as string) && num(s.maxCapacity) && num(s.price)) &&
+    list(v.bookings, b => str(b.id) && str(b.sessionId) && str(b.playerId) && BOOKING_STATUSES.includes(b.status as string) && ATTENDANCE.includes(b.attendance as string) && date(b.bookedAt) && optDate(b.cancelledAt) && optDate(b.graceExpiresAt) && optDate(b.decidedAt)) &&
+    list(v.homework, h => str(h.id) && str(h.playerId) && str(h.title) && str(h.category) && str(h.repsOrMinutes) && str(h.notes) && date(h.assignedAt) && bool(h.completed)) &&
+    list(v.films, f =>
+      str(f.id) && str(f.playerId) && str(f.title) && date(f.uploadedAt) &&
+      (f.videoUrl === undefined || str(f.videoUrl)) && (f.videoKey === undefined || str(f.videoKey)) &&
+      list(f.notes, n => str(n.id) && num(n.timestamp) && str(n.text) && str(n.author)) &&
+      list(f.voiceNotes, n => str(n.id) && num(n.timestamp) && num(n.duration) && str(n.mediaKey)) &&
+      list(f.drawings, d => str(d.id) && num(d.timestamp) && list(d.strokes, s => str(s.id) && TOOLS.includes(s.tool as string) && str(s.color) && Array.isArray(s.points) && s.points.every(point)))
+    ) &&
+    list(v.coachNotes, n => str(n.id) && str(n.playerId) && str(n.text) && date(n.createdAt)) &&
+    isObj(v.notifyPrefs) &&
+    Object.values(v.notifyPrefs).every(p => isObj(p) && bool(p.sms) && bool(p.email) && bool(p.push))
   );
 }

@@ -1,5 +1,14 @@
 # CMO Training — Session History
 
+## 2026-11-03 — v0.3: hardening after the second critique
+
+- Damaged saved data no longer blanks the app: every saved record is checked (`isValidState`), and a crash screen (`ErrorBoundary`) offers Reload / Reset demo data.
+- Two tabs can't lose each other's changes: all writes go through a Web Locks lock and re-read storage first (racing for the last spot now gives one booking and one "full").
+- Check-in only opens 30 min before a session (until 12 h after); late-cancelled spots stay locked unless waived (matches "late cancellations lock court time").
+- Offline: the service worker caches the sample clip and answers video range requests from cache. Fonts self-hosted (Fontsource), no requests to other sites; CSP is `'self'` only. Fonts were briefly inlined as data: URLs and blocked by the CSP; fixed with `assetsInlineLimit: 0`.
+- Clickjacking guard (refuses to run framed), persistent-storage request, iPhone "Add to Home Screen" hint. `npm run phone` serves the built app, not the dev server, to Wi-Fi.
+- Safari engine: storing files in IndexedDB fails in private mode; media now falls back to raw bytes. Found by a new WebKit test (11/11). Chrome 50/50. 16 rule tests; three new mutations each caught.
+
 ## 2026-11-03 — v0.2: audit fixes, real demo behaviour, installable
 
 - Audit found 15 bugs plus many fake actions; all 15 fixed. Highlights: drawing works by touch (pointer events), drawings are saved per frame as 0..1 coordinates and survive resize/rotation, attendance is per booking (was per player across sessions), the athlete view no longer jumps to coach view, the camera comes back after off/on and stops when leaving the tab, a denied camera shows a message, play state follows the video, ±1 frame is 1/30 s, pinch zoom allowed.

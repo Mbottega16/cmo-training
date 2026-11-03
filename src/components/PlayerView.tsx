@@ -63,16 +63,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, naviga
 
   const toggleNotify = (key: keyof NotifyPrefs) => update(s => setNotifyPrefs(s, player.id, { ...prefs, [key]: !prefs[key] }));
 
-  const confirmBooking = () => {
+  const confirmBooking = async () => {
     if (!picked) return;
-    const result = run(s => bookSession(s, picked.id, player.id, new Date()));
+    const result = await run(s => bookSession(s, picked.id, player.id, new Date()));
     setToast({ message: result.message, tone: result.ok ? 'good' : 'bad' });
     if (result.ok) closeBooking();
   };
 
-  const confirmCancel = () => {
+  const confirmCancel = async () => {
     if (!cancelTarget) return;
-    const result = run(s => cancelBooking(s, cancelTarget.id, new Date()));
+    const result = await run(s => cancelBooking(s, cancelTarget.id, new Date()));
     const late = result.ok && result.state.bookings.find(b => b.id === cancelTarget.id)?.status === 'cancelled_late';
     setToast({ message: result.message, tone: !result.ok ? 'bad' : late ? 'warn' : 'good' });
     setCancelTarget(null);

@@ -29,6 +29,13 @@ export function routeToHash(route: Route): string {
   return route.role === 'coach' ? `#/coach/${route.tab}` : `#/athlete/${route.athleteId}/${route.tab}`;
 }
 
+/** iPhone/iPad Safari not opened from the home screen: saved work there can be cleared after ~7 days unused. */
+function needsInstallHint(): boolean {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
+  return ios && !standalone;
+}
+
 export const App: React.FC = () => {
   const store = useDemoStore();
   const { state } = store;
@@ -51,7 +58,7 @@ export const App: React.FC = () => {
 
   const handleReset = () => {
     if (window.confirm('Reset the demo? This clears every booking, note, drawing and voice memo saved in this browser.')) {
-      store.reset();
+      void store.reset();
     }
   };
 
@@ -81,6 +88,13 @@ export const App: React.FC = () => {
           </button>
         </div>
 
+        {needsInstallHint() && (
+          <div className="bg-brand-accent/10 border border-brand-accent/40 rounded-2xl p-3 text-xs text-blue-200">
+            On iPhone, tap <strong>Share → Add to Home Screen</strong>. It opens like an app, works without signal, and keeps your saved work
+            (Safari may clear it after a week without a visit otherwise).
+          </div>
+        )}
+
         {!hasUpcoming && (
           <div className="bg-brand-orange/10 border border-brand-orange/40 rounded-2xl p-3 text-xs text-orange-200">
             Every demo session is now in the past. Press <strong>Reset demo</strong> to get fresh session times.
@@ -108,7 +122,7 @@ export const App: React.FC = () => {
       </main>
 
       <footer className="border-t border-brand-border/60 py-4 px-4 text-center text-xs text-slate-500 bg-brand-dark pb-[max(1rem,env(safe-area-inset-bottom))]">
-        CMO Training demo v0.2 · made-up data · built for review and feedback
+        CMO Training demo v0.3 · made-up data · built for review and feedback
       </footer>
     </div>
   );

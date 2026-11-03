@@ -6,8 +6,8 @@ import react from '@vitejs/plugin-react';
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' https://fonts.googleapis.com",
-  'font-src https://fonts.gstatic.com',
+  "style-src 'self'",
+  "font-src 'self'",
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",
   "connect-src 'self'",
@@ -32,6 +32,8 @@ export default defineConfig({
   // Relative paths so the built site works from any folder, including a GitHub Pages project URL.
   base: './',
   plugins: [react(), contentSecurityPolicy()],
+  // Never inline fonts or media as data: URLs: the CSP only allows files from this site.
+  build: { assetsInlineLimit: 0 },
   server: {
     // Local only, on an explicit address so a busy port is noticed and the next free one is used
     // (other projects on this Mac also use 5173). `npm run dev:phone` opens it to the Wi-Fi network.

@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Check, X, Clock, MapPin, Dumbbell, Send, Users } from 'lucide-react';
 import type { Player } from '../types';
 import type { DemoStore } from '../store';
-import { assignHomework, CHECK_IN_XP, confirmedBookings, sessionPhase, setAttendance } from '../logic';
+import { assignHomework, attendanceWindow, CHECK_IN_OPENS_MINUTES, CHECK_IN_XP, confirmedBookings, sessionPhase, setAttendance } from '../logic';
 import { formatSessionTime, plural, sessionTypeLabel, useNow } from '../format';
 import { Avatar, Modal, Toast, XpBadge } from './ui';
 
@@ -39,6 +39,8 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
     .map(b => ({ booking: b, player: state.players.find(p => p.id === b.playerId) }))
     .filter((r): r is { booking: typeof r.booking; player: Player } => Boolean(r.player));
   const checkedIn = roster.filter(r => r.booking.attendance === 'present').length;
+  const checkInWindow = attendanceWindow(session, now);
+  const checkInOpen = checkInWindow === 'open';
 
   const handleAssign = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,6 +125,14 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
 
       {toast && <Toast message={toast} onDone={clearToast} />}
 
+      {!checkInOpen && roster.length > 0 && (
+        <div className="bg-brand-surface border border-brand-border rounded-xl px-4 py-3 text-xs text-slate-300">
+          {checkInWindow === 'early'
+            ? `Check-in opens ${CHECK_IN_OPENS_MINUTES} minutes before the session starts. You can still assign drills.`
+            : 'Check-in for this session is closed.'}
+        </div>
+      )}
+
       <section className="space-y-3" aria-label="Court roster and check-in">
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">Court Roster & Check-In</h3>
 
@@ -158,9 +168,10 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
 
                 <div className="flex items-stretch gap-2">
                   <button
-                    onClick={() => update(s => setAttendance(s, booking.id, status === 'present' ? 'pending' : 'present'))}
+                    onClick={() => update(s => setAttendance(s, booking.id, status === 'present' ? 'pending' : 'present', new Date()))}
+                    disabled={!checkInOpen}
                     aria-pressed={status === 'present'}
-                    className={`flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+                    className={`flex-1 sm:flex-initial min-h-[48px] py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                       status === 'present'
                         ? 'bg-brand-green text-white shadow-lg shadow-brand-green/20'
                         : 'bg-brand-surface border border-brand-border hover:border-brand-green/60 text-slate-200'
@@ -171,11 +182,12 @@ export const CoachFloorMode: React.FC<{ store: DemoStore }> = ({ store }) => {
                   </button>
 
                   <button
-                    onClick={() => update(s => setAttendance(s, booking.id, status === 'absent' ? 'pending' : 'absent'))}
+                    onClick={() => update(s => setAttendance(s, booking.id, status === 'absent' ? 'pending' : 'absent', new Date()))}
+                    disabled={!checkInOpen}
                     aria-pressed={status === 'absent'}
                     aria-label={status === 'absent' ? `Undo no-show for ${player.name}` : `Mark ${player.name} as a no-show`}
                     title="No-show"
-                    className={`min-h-[48px] min-w-[48px] px-3 rounded-xl text-sm font-bold flex items-center justify-center transition-all ${
+                    className={`min-h-[48px] min-w-[48px] px-3 rounded-xl text-sm font-bold flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                       status === 'absent' ? 'bg-red-600 text-white' : 'bg-brand-surface border border-brand-border text-slate-400 hover:text-red-400'
                     }`}
                   >

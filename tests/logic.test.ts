@@ -15,6 +15,7 @@ import {
   isValidState,
   sessionPhase,
   setAttendance,
+  spotsLeft,
   undoStroke,
   waiveLateCancel
 } from '../src/logic.ts';
@@ -123,16 +124,16 @@ test('the grace window runs out into a forfeit, not before', () => {
 
 test('check-in gives XP once, and undoing or switching to no-show takes it back', () => {
   const s = createSeed(NOW); // b2 = Marcus in s1, pending
-  const present = setAttendance(s, 'b2', 'present');
+  const present = setAttendance(s, 'b2', 'present', NOW);
   assert.equal(xp(present, 'p2'), xp(s, 'p2') + CHECK_IN_XP);
-  assert.equal(setAttendance(present, 'b2', 'present'), present, 'checking in twice changes nothing');
-  assert.equal(xp(setAttendance(present, 'b2', 'pending'), 'p2'), xp(s, 'p2'));
-  assert.equal(xp(setAttendance(present, 'b2', 'absent'), 'p2'), xp(s, 'p2'));
+  assert.equal(setAttendance(present, 'b2', 'present', NOW), present, 'checking in twice changes nothing');
+  assert.equal(xp(setAttendance(present, 'b2', 'pending', NOW), 'p2'), xp(s, 'p2'));
+  assert.equal(xp(setAttendance(present, 'b2', 'absent', NOW), 'p2'), xp(s, 'p2'));
 });
 
 test('attendance belongs to one booking: checking Marcus in today does not touch his later session', () => {
   const s = createSeed(NOW); // b2 = Marcus in s1, b7 = Marcus in s5
-  const next = setAttendance(s, 'b2', 'present');
+  const next = setAttendance(s, 'b2', 'present', NOW);
   assert.equal(booking(next, 'b2').attendance, 'present');
   assert.equal(booking(next, 'b7').attendance, 'pending');
 });
@@ -157,4 +158,45 @@ test('saved data is only trusted when it has the expected shape', () => {
   assert.equal(isValidState({ ...createSeed(NOW), version: 1 }, STATE_VERSION), false);
   assert.equal(isValidState({ ...createSeed(NOW), players: [{ id: 'x' }] }, STATE_VERSION), false);
   assert.equal(isValidState({ ...createSeed(NOW), sessions: [{ id: 's', start: 'nope', end: 'nope' }] }, STATE_VERSION), false);
+});
+
+test('check-in only works from 30 minutes before a session until 12 hours after it', () => {
+  const s = createSeed(NOW); // b7 = Marcus in s5, three days out
+  assert.equal(setAttendance(s, 'b7', 'present', NOW), s, 'refused days ahead');
+  const start = new Date(s.sessions.find(x => x.id === 's5')!.start).getTime();
+  const end = new Date(s.sessions.find(x => x.id === 's5')!.end).getTime();
+  assert.equal(booking(setAttendance(s, 'b7', 'present', new Date(start - 29 * 60_000)), 'b7').attendance, 'present', 'open 29 min before');
+  assert.equal(setAttendance(s, 'b7', 'present', new Date(start - 31 * 60_000)), s, 'still shut 31 min before');
+  assert.equal(setAttendance(s, 'b7', 'present', new Date(end + 13 * HOUR)), s, 'closed 13 h after');
+});
+
+test('a late-cancelled spot stays locked; a waiver frees it, a forfeit does not', () => {
+  const s = withSessionIn(2); // sx: capacity 2, Jordan booked
+  const session = (st: DemoState) => st.sessions.find(x => x.id === 'sx')!;
+  assert.equal(spotsLeft(s, session(s)), 1);
+  const late = cancelBooking(s, 'b-test', NOW).state;
+  assert.equal(spotsLeft(late, session(late)), 1, 'late cancel keeps the spot held');
+  assert.equal(spotsLeft(enforceLateCancel(late, 'b-test', NOW).state, session(late)), 1, 'forfeit keeps it held');
+  const waived = waiveLateCancel(late, 'b-test', NOW).state;
+  assert.equal(spotsLeft(waived, session(waived)), 2, 'waiver frees it');
+  const early = cancelBooking(withSessionIn(10), 'b-test', NOW).state;
+  assert.equal(spotsLeft(early, early.sessions.find(x => x.id === 'sx')!), 2, 'timely cancel frees it');
+});
+
+test('one damaged record anywhere makes the whole saved state untrusted', () => {
+  const seed = () => createSeed(NOW);
+  const broken: Array<[string, (s: any) => void]> = [
+    ['film without notes', s => { delete s.films[0].notes; }],
+    ['bare film record', s => { s.films = [{ id: 'f', playerId: 'p1' }]; }],
+    ['unknown booking status', s => { s.bookings[0].status = 'paid'; }],
+    ['drawing point not a number', s => { s.films[0].drawings[0].strokes[0].points[0].x = 'a'; }],
+    ['homework missing title', s => { delete s.homework[0].title; }],
+    ['notification prefs not booleans', s => { s.notifyPrefs = { p1: { sms: 'yes', email: true, push: true } }; }],
+    ['coach note with bad date', s => { s.coachNotes[0].createdAt = 'tomorrow'; }]
+  ];
+  for (const [label, damage] of broken) {
+    const s = structuredClone(seed());
+    damage(s);
+    assert.equal(isValidState(s, STATE_VERSION), false, label);
+  }
 });

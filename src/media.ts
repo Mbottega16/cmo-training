@@ -5,7 +5,7 @@
 const DB_NAME = 'cmo-training-media';
 const STORE = 'media';
 
-export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -35,13 +35,32 @@ async function withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore
   }
 }
 
-export function putMedia(key: string, blob: Blob): Promise<IDBValidKey> {
-  return withStore('readwrite', s => s.put(blob, key));
+interface RawMedia {
+  type: string;
+  data: ArrayBuffer;
+}
+
+/**
+ * Stores the file as-is. Safari in private browsing refuses to store files in IndexedDB, so on failure the raw
+ * bytes are stored instead (uses more memory while saving, which is why clips are capped).
+ */
+export async function putMedia(key: string, blob: Blob): Promise<void> {
+  try {
+    await withStore('readwrite', s => s.put(blob, key));
+  } catch {
+    const raw: RawMedia = { type: blob.type, data: await blob.arrayBuffer() };
+    await withStore('readwrite', s => s.put(raw, key));
+  }
 }
 
 export async function getMedia(key: string): Promise<Blob | undefined> {
   const value = await withStore<unknown>('readonly', s => s.get(key));
-  return value instanceof Blob ? value : undefined;
+  if (value instanceof Blob) return value;
+  if (value && typeof value === 'object' && (value as RawMedia).data instanceof ArrayBuffer) {
+    const raw = value as RawMedia;
+    return new Blob([raw.data], { type: raw.type });
+  }
+  return undefined;
 }
 
 export function deleteMedia(key: string): Promise<undefined> {
