@@ -33,7 +33,11 @@ const Root: React.FC<{ page: PageName }> = ({ page }) => {
   const [backend, setBackend] = useState<Backend | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    if (page !== 'landing') createBackend().then(setBackend, () => setFailed(true));
+    if (page === 'landing') return;
+    // Check the time against the server before any data is created or rules run, so a phone with a wrong clock
+    // can't skew the demo's session times. Never wait more than 2 seconds (offline: carry on with the device clock).
+    const clockChecked = Promise.race([syncClock(), new Promise(resolve => window.setTimeout(resolve, 2000))]);
+    clockChecked.then(() => createBackend()).then(setBackend, () => setFailed(true));
   }, [page]);
   if (page === 'landing') return <Landing />;
   if (failed) return <Loading label="Could not start. Check your connection and reload." />;
@@ -75,7 +79,6 @@ export function boot(page: PageName): void {
     </React.StrictMode>
   );
 
-  void syncClock();
   window.addEventListener('online', () => void syncClock());
   // Ask the browser not to clear saved work when space runs low.
   void navigator.storage?.persist?.().catch(() => undefined);
