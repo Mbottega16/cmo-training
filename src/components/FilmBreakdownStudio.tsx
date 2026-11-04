@@ -133,11 +133,22 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
       setVideoSrc(undefined);
       return;
     }
+    const videoKey = film.videoKey;
     let cancelled = false;
     let url: string | undefined;
     setVideoSrc(undefined);
-    media.get(film.videoKey)
-      .then(blob => {
+
+    (async () => {
+      try {
+        if (media.getUrl) {
+          const directUrl = await media.getUrl(videoKey);
+          if (cancelled) return;
+          if (directUrl) {
+            setVideoSrc(directUrl);
+            return;
+          }
+        }
+        const blob = await media.get(videoKey);
         if (cancelled) return;
         if (!blob) {
           setVideoError('This clip was saved in a different browser, or the browser cleared it. Load the file again.');
@@ -145,8 +156,11 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
         }
         url = URL.createObjectURL(blob);
         setVideoSrc(url);
-      })
-      .catch(() => !cancelled && setVideoError('This browser could not open its saved clips.'));
+      } catch {
+        if (!cancelled) setVideoError('This browser could not open its saved clips.');
+      }
+    })();
+
     return () => {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
@@ -400,12 +414,14 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
     }
     setUploading(true);
     const key = `films/${athlete.id}/${uid('vid')}`;
+    const defaultTitle = file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Game film';
+    const customTitle = window.prompt(`Title this clip for ${athlete.name}:`, defaultTitle)?.trim() || defaultTitle;
     try {
       await media.put(key, file);
       const review: FilmReview = {
         id: uid('f'),
         playerId: athlete.id,
-        title: file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Game film',
+        title: customTitle,
         videoKey: key,
         uploadedAt: clockNow().toISOString(),
         notes: [],

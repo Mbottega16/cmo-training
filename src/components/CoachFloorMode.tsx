@@ -8,6 +8,22 @@ import { Avatar, Modal, Toast, XpBadge } from './ui';
 
 const DRILL_CATEGORIES = ['Ball Handling', 'Shooting Mechanics', 'Finishing & Footwork', 'Decision Making / Reads', 'Conditioning & Agility', 'Defense'];
 
+interface DrillPreset {
+  title: string;
+  category: string;
+  repsOrMinutes: string;
+  notes: string;
+}
+
+const DRILL_PRESETS: DrillPreset[] = [
+  { title: 'Form Shooting 5-Spot', category: 'Shooting Mechanics', repsOrMinutes: '100 makes (20/spot)', notes: 'Elbow aligned under ball, hold follow-through until swish.' },
+  { title: 'Two-Ball Pound & Cross', category: 'Ball Handling', repsOrMinutes: '10 mins continuous', notes: 'Eyes up, continuous heavy pound below knee level.' },
+  { title: 'Mikan & Reverse Mikan', category: 'Finishing & Footwork', repsOrMinutes: '50 makes left & right', notes: 'High release off glass, do not let ball drop below chin.' },
+  { title: 'Pick & Roll Read Series', category: 'Decision Making / Reads', repsOrMinutes: '20 live reps / video', notes: 'Snake vs drop, pocket pass vs weakside drift read.' },
+  { title: 'Defensive Slides & Closeout', category: 'Defense', repsOrMinutes: '6 sets of 30s', notes: 'Choppy feet on closeout, contest with high hand without fouling.' },
+  { title: 'Full-Court 17s Sprints', category: 'Conditioning & Agility', repsOrMinutes: '3 sets (under 65s)', notes: 'Touch sidelines with foot, recover with nasal breathing.' },
+];
+
 export const CoachFloorMode: React.FC<{ store: AppStore }> = ({ store }) => {
   const { state, dispatch } = store;
   const { settings } = state;
@@ -212,6 +228,27 @@ export const CoachFloorMode: React.FC<{ store: AppStore }> = ({ store }) => {
           onClose={closeModal}
         >
           <form onSubmit={handleAssign} className="space-y-3.5 text-sm">
+            <div>
+              <span className="block text-slate-400 font-semibold mb-1.5 text-[11px] uppercase tracking-wider">Quick Presets</span>
+              <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-none">
+                {DRILL_PRESETS.map(p => (
+                  <button
+                    key={p.title}
+                    type="button"
+                    onClick={() => {
+                      setDrillTitle(p.title);
+                      setDrillCategory(p.category);
+                      setDrillReps(p.repsOrMinutes);
+                      setDrillNote(p.notes);
+                    }}
+                    className="shrink-0 text-xs px-2.5 py-1.5 rounded-lg bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-300 hover:text-white transition font-medium"
+                  >
+                    {p.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <label className="block">
               <span className="block text-slate-300 font-semibold mb-1 text-xs">Drill / focus</span>
               <input

@@ -19,6 +19,7 @@ export interface MediaStore {
   put(key: string, blob: Blob): Promise<void>;
   get(key: string): Promise<Blob | undefined>;
   remove(key: string): Promise<void>;
+  getUrl?(key: string): Promise<string | undefined>;
 }
 
 /** A tiny message channel for setting up a video call between two devices. */

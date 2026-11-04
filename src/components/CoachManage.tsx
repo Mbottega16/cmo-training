@@ -36,6 +36,7 @@ export const CoachManage: React.FC<{ store: AppStore }> = ({ store }) => {
   const [type, setType] = useState<SessionType>('small_group');
   const [capacity, setCapacity] = useState(6);
   const [price, setPrice] = useState(65);
+  const [repeatWeeks, setRepeatWeeks] = useState(1);
 
   const report = (r: { ok: boolean; message: string }) => r.message && setToast({ message: r.message, tone: r.ok ? 'good' : 'bad' });
 
@@ -52,25 +53,40 @@ export const CoachManage: React.FC<{ store: AppStore }> = ({ store }) => {
 
   const addSession = async (e: React.FormEvent) => {
     e.preventDefault();
-    const start = new Date(startAt);
-    const r = await dispatch(
-      {
-        type: 'session.add',
-        session: {
-          title: title.trim(),
-          courtLocation: type === 'virtual_live' ? 'CMO Video Room' : where.trim(),
-          courtAddress: type === 'virtual_live' ? 'Online' : '',
-          start: Number.isNaN(start.getTime()) ? '' : start.toISOString(),
-          end: Number.isNaN(start.getTime()) ? '' : new Date(start.getTime() + minutes * 60_000).toISOString(),
-          type,
-          maxCapacity: type === 'one_on_one' || type === 'virtual_live' ? 1 : capacity,
-          price
-        }
-      },
-      { quiet: true }
-    );
-    report(r);
-    if (r.ok) setTitle('');
+    const baseStart = new Date(startAt);
+    if (Number.isNaN(baseStart.getTime())) {
+      report({ ok: false, message: 'Invalid start time.' });
+      return;
+    }
+    const weeks = Math.max(1, Math.min(12, repeatWeeks));
+    let lastResult: { ok: boolean; message: string } = { ok: true, message: '' };
+    for (let w = 0; w < weeks; w++) {
+      const start = new Date(baseStart.getTime() + w * 7 * 86_400_000);
+      const end = new Date(start.getTime() + minutes * 60_000);
+      lastResult = await dispatch(
+        {
+          type: 'session.add',
+          session: {
+            title: title.trim(),
+            courtLocation: type === 'virtual_live' ? 'CMO Video Room' : where.trim(),
+            courtAddress: type === 'virtual_live' ? 'Online' : '',
+            start: start.toISOString(),
+            end: end.toISOString(),
+            type,
+            maxCapacity: type === 'one_on_one' || type === 'virtual_live' ? 1 : capacity,
+            price
+          }
+        },
+        { quiet: true }
+      );
+      if (!lastResult.ok) break;
+    }
+    if (lastResult.ok) {
+      report({ ok: true, message: weeks > 1 ? `Scheduled ${weeks} weekly sessions.` : lastResult.message || 'Session added.' });
+      setTitle('');
+    } else {
+      report(lastResult);
+    }
   };
 
   const makeInvite = async (playerId: string, playerName: string) => {
@@ -216,8 +232,16 @@ export const CoachManage: React.FC<{ store: AppStore }> = ({ store }) => {
             <span className={label}>Price ($)</span>
             <input type="number" min={0} max={10000} inputMode="decimal" value={price} onChange={e => setPrice(Number(e.target.value))} className={field} />
           </label>
+          <label className="sm:col-span-6">
+            <span className={label}>Schedule recurrence</span>
+            <select value={repeatWeeks} onChange={e => setRepeatWeeks(Number(e.target.value))} className={field}>
+              <option value={1}>One-off session (just this date)</option>
+              <option value={4}>Repeat weekly for 4 weeks (4 sessions)</option>
+              <option value={8}>Repeat weekly for 8 weeks (8 sessions)</option>
+            </select>
+          </label>
           <button type="submit" className="sm:col-span-6 min-h-[44px] rounded-xl bg-brand-action hover:bg-brand-actionHover text-white font-semibold text-sm flex items-center justify-center gap-2">
-            <CalendarPlus className="w-4 h-4" /> Add session
+            <CalendarPlus className="w-4 h-4" /> {repeatWeeks > 1 ? `Schedule ${repeatWeeks} weekly sessions` : 'Add session'}
           </button>
         </form>
       </section>

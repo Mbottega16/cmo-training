@@ -271,6 +271,15 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
       },
       async remove(key) {
         await sb.storage.from('media').remove([key]);
+      },
+      async getUrl(key) {
+        try {
+          const { data, error } = await sb.storage.from('media').createSignedUrl(key, 7200);
+          if (error || !data?.signedUrl) return undefined;
+          return data.signedUrl;
+        } catch {
+          return undefined;
+        }
       }
     },
     signal(room, onMessage): SignalChannel {

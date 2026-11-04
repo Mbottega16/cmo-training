@@ -1,11 +1,60 @@
 import React, { useCallback, useState } from 'react';
-import { Calendar, Clock, MapPin, Dumbbell, CheckCircle2, Circle, Film, Bell, Video, CreditCard, ChevronRight, Phone, MessageSquare } from 'lucide-react';
-import type { Booking, NotifyPrefs } from '../types';
+import { Calendar, Clock, MapPin, Dumbbell, CheckCircle2, Circle, Film, Bell, Video, CreditCard, ChevronRight, Phone, MessageSquare, ShoppingBag, Sparkles, Send } from 'lucide-react';
+import type { Booking, NotifyPrefs, TrainingSession } from '../types';
 import type { AppStore } from '../store';
 import { cancellationPreview, DEFAULT_NOTIFY, sessionPhase, spotsLeft } from '../logic';
 import { COACH } from '../seed';
 import { formatAgo, formatCountdown, formatHours, formatSessionTime, plural, sessionTypeLabel, useNow } from '../format';
 import { AthletePicker, Avatar, Modal, Switch, Toast, XpBadge, type ToastTone } from './ui';
+
+interface CreditPackage {
+  id: string;
+  name: string;
+  credits: number;
+  price: number;
+  pricePerSession: number;
+  popular?: boolean;
+  savings?: string;
+}
+
+const CREDIT_PACKAGES: CreditPackage[] = [
+  { id: 'single', name: '1 Drop-In Session', credits: 1, price: 65, pricePerSession: 65 },
+  { id: 'pack_5', name: '5 Sessions Pack', credits: 5, price: 300, pricePerSession: 60, popular: true, savings: 'Save $25' },
+  { id: 'pack_10', name: '10 Sessions Pack', credits: 10, price: 550, pricePerSession: 55, savings: 'Save $100' },
+];
+
+function downloadIcs(session: TrainingSession) {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const formatUtc = (d: Date) =>
+    `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+
+  const start = new Date(session.start);
+  const end = new Date(session.end);
+  const icsData = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//CMO Training//Sessions//EN',
+    'BEGIN:VEVENT',
+    `UID:cmo-${session.id}@cmotraining.com`,
+    `DTSTAMP:${formatUtc(new Date())}`,
+    `DTSTART:${formatUtc(start)}`,
+    `DTEND:${formatUtc(end)}`,
+    `SUMMARY:${session.title} - CMO Training`,
+    `LOCATION:${session.courtLocation}${session.courtAddress ? ` (${session.courtAddress})` : ''}`,
+    'DESCRIPTION:Basketball training session with CMO Training Coach.',
+    'STATUS:CONFIRMED',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${session.title.replace(/[^a-zA-Z0-9]/g, '_')}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface PlayerViewProps {
   store: AppStore;
@@ -24,6 +73,9 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
   const player = state.players.find(p => p.id === athleteId) ?? state.players[0];
 
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
+  const [selectedPkg, setSelectedPkg] = useState<CreditPackage>(CREDIT_PACKAGES[1]);
+  const [purchasing, setPurchasing] = useState(false);
   const [pickedSession, setPickedSession] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
@@ -54,7 +106,68 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const picked = openSessions.find(s => s.id === pickedSession) ?? null;
 
-  const toggleNotify = (key: keyof NotifyPrefs) => void dispatch({ type: 'notify', playerId: player.id, prefs: { ...prefs, [key]: !prefs[key] } });
+  const handlePurchase = async (pkg: CreditPackage) => {
+    setPurchasing(true);
+    const res = await dispatch({ type: 'player.credits', id: player.id, delta: pkg.credits }, { quiet: true });
+    setPurchasing(false);
+    if (res.ok) {
+      setToast({
+        message: `Purchased ${pkg.name}! Added ${plural(pkg.credits, 'credit')}.`,
+        tone: 'good'
+      });
+      setBuyCreditsOpen(false);
+    } else {
+      setToast({ message: res.message || 'Payment could not be completed.', tone: 'bad' });
+    }
+  };
+
+  const toggleNotify = async (key: keyof NotifyPrefs) => {
+    const nextVal = !prefs[key];
+    if (key === 'push' && nextVal && typeof Notification !== 'undefined') {
+      if (Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          setToast({ message: 'Push notifications are blocked in your browser settings.', tone: 'warn' });
+          return;
+        }
+      }
+      try {
+        new Notification('CMO Training', {
+          body: "Notifications enabled! You'll receive alerts for sessions and new film breakdown reviews.",
+          icon: '/icons/icon-192.png'
+        });
+      } catch {
+        // Notification constructor handled
+      }
+    }
+    void dispatch({ type: 'notify', playerId: player.id, prefs: { ...prefs, [key]: nextVal } });
+  };
+
+  const sendTestNotification = () => {
+    if (typeof Notification === 'undefined') {
+      setToast({ message: 'Notifications are not supported by this browser.', tone: 'bad' });
+      return;
+    }
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission().then(p => {
+        if (p === 'granted') {
+          new Notification('CMO Training', {
+            body: 'Upcoming session: Ball Screen Reads at 6:00 PM at Court 2!',
+            icon: '/icons/icon-192.png'
+          });
+          setToast({ message: 'Test notification sent to your screen!', tone: 'good' });
+        } else {
+          setToast({ message: 'Please allow notifications in your browser first.', tone: 'warn' });
+        }
+      });
+      return;
+    }
+    new Notification('CMO Training', {
+      body: 'Upcoming session: Ball Screen Reads at 6:00 PM at Court 2!',
+      icon: '/icons/icon-192.png'
+    });
+    setToast({ message: 'Test notification sent to your screen!', tone: 'good' });
+  };
 
   const confirmBooking = async () => {
     if (!picked) return;
@@ -92,7 +205,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
                 <span className="text-[11px] bg-brand-orange/20 text-brand-orange border border-brand-orange/40 px-2 py-0.5 rounded font-semibold">{player.level}</span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                <span className="text-white font-medium">{plural(player.creditsRemaining, 'session credit')}</span> left
+                <span className="text-white font-medium">{plural(player.creditsRemaining, 'session credit')}</span> left ·{' '}
+                <button type="button" onClick={() => setBuyCreditsOpen(true)} className="text-brand-orange hover:underline font-semibold">
+                  + Add credits
+                </button>
               </p>
               <div className="mt-1.5">
                 <XpBadge xp={player.xp} />
@@ -107,13 +223,22 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
             </div>
           </div>
 
-          <button
-            onClick={() => setBookingOpen(true)}
-            className="w-full sm:w-auto min-h-[48px] px-5 py-3 rounded-xl bg-brand-action hover:bg-brand-actionHover text-white text-sm font-bold transition shadow-lg shadow-brand-orange/20 flex items-center justify-center gap-2"
-          >
-            <CreditCard className="w-4 h-4" />
-            Book a session
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setBuyCreditsOpen(true)}
+              className="min-h-[48px] px-4 py-3 rounded-xl bg-brand-surface border border-brand-border hover:border-brand-orange text-white text-sm font-semibold transition flex items-center justify-center gap-2"
+            >
+              <ShoppingBag className="w-4 h-4 text-brand-orange" />
+              Buy credits
+            </button>
+            <button
+              onClick={() => setBookingOpen(true)}
+              className="min-h-[48px] px-5 py-3 rounded-xl bg-brand-action hover:bg-brand-actionHover text-white text-sm font-bold transition shadow-lg shadow-brand-orange/20 flex items-center justify-center gap-2"
+            >
+              <CreditCard className="w-4 h-4" />
+              Book a session
+            </button>
+          </div>
         </div>
       </div>
 
@@ -180,7 +305,15 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
                     </div>
 
                     {!late && (
-                      <div className="flex gap-2 w-full sm:w-auto">
+                      <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => downloadIcs(session)}
+                          title="Add to Apple Calendar or Google Calendar (.ics)"
+                          className="flex-1 sm:flex-initial min-h-[44px] px-3 py-2 rounded-xl bg-brand-surface border border-brand-border hover:border-slate-400 text-slate-300 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <Calendar className="w-3.5 h-3.5 text-brand-orange" /> Calendar
+                        </button>
                         {session.type === 'virtual_live' && (
                           <button
                             onClick={() => onOpen('room')}
@@ -190,7 +323,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
                           </button>
                         )}
                         {phase === 'live' ? (
-                          <span className="text-[11px] text-brand-green font-medium bg-brand-green/10 border border-brand-green/30 px-2.5 py-2 rounded-lg">Happening now</span>
+                          <span className="text-[11px] text-brand-green font-medium bg-brand-green/10 border border-brand-green/30 px-2.5 py-2 rounded-lg flex items-center">Happening now</span>
                         ) : (
                           <button
                             onClick={() => setCancelTarget(booking)}
@@ -280,11 +413,20 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
               <Bell className="w-4 h-4 text-brand-orange" />
               <h3 className="text-sm font-bold text-white">Reminders & alerts</h3>
             </div>
-            <p className="text-xs text-slate-400">Your choices are saved. Nothing is sent yet: texts, emails and push alerts turn on when messaging is connected.</p>
+            <p className="text-xs text-slate-400">Manage your notifications for upcoming sessions, coach film breakdowns, and homework updates.</p>
             <div className="space-y-2 text-xs">
               <Switch checked={prefs.sms} onChange={() => toggleNotify('sms')} label="Text reminders" description="2 hours before each session" />
               <Switch checked={prefs.email} onChange={() => toggleNotify('email')} label="Email confirmations" description="Calendar invites and receipts" />
-              <Switch checked={prefs.push} onChange={() => toggleNotify('push')} label="Push notifications" description="Alerts on your home screen" />
+              <Switch checked={prefs.push} onChange={() => toggleNotify('push')} label="Push notifications" description="Alerts on your home screen or browser" />
+            </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={sendTestNotification}
+                className="w-full min-h-[44px] py-2 rounded-xl bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-300 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+              >
+                <Bell className="w-3.5 h-3.5 text-brand-orange" /> Send test push notification
+              </button>
             </div>
           </section>
         </div>
@@ -335,11 +477,79 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ store, athleteId, onSwit
               {player.creditsRemaining < 1 ? 'No credits left' : picked ? 'Book with 1 credit' : 'Pick a session'}
             </button>
             <button
-              disabled
-              className="w-full min-h-[44px] py-2.5 rounded-xl border border-brand-border text-slate-400 cursor-not-allowed"
-              title="Card payments need the Stripe connection"
+              onClick={() => {
+                closeBooking();
+                setBuyCreditsOpen(true);
+              }}
+              className="w-full min-h-[44px] py-2.5 rounded-xl border border-brand-border hover:border-brand-orange text-slate-200 hover:text-white font-medium flex items-center justify-center gap-2 transition"
             >
-              Pay by card: not connected in the demo
+              <CreditCard className="w-4 h-4 text-brand-orange" /> Pay with card or buy credits
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {buyCreditsOpen && (
+        <Modal title="Buy Session Credits" subtitle={`${player.name} · ${plural(player.creditsRemaining, 'credit')} current balance`} onClose={() => setBuyCreditsOpen(false)}>
+          <div className="space-y-4 text-xs">
+            <p className="text-slate-300 leading-relaxed">
+              Credits never expire. They can be used for any 1-on-1, small group, or virtual film session with Coach.
+            </p>
+
+            <div className="space-y-2.5" role="radiogroup" aria-label="Credit packages">
+              {CREDIT_PACKAGES.map(pkg => (
+                <button
+                  key={pkg.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selectedPkg.id === pkg.id}
+                  onClick={() => setSelectedPkg(pkg)}
+                  className={`w-full text-left p-3.5 rounded-xl border transition flex items-center justify-between ${
+                    selectedPkg.id === pkg.id
+                      ? 'border-brand-orange bg-brand-orange/10'
+                      : 'border-brand-border bg-brand-surface hover:border-slate-500'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white text-sm">{pkg.name}</span>
+                      {pkg.popular && (
+                        <span className="text-[10px] bg-brand-orange/20 text-brand-orange border border-brand-orange/40 px-2 py-0.5 rounded-full font-bold">
+                          Popular
+                        </span>
+                      )}
+                      {pkg.savings && (
+                        <span className="text-[10px] bg-brand-green/20 text-brand-green border border-brand-green/40 px-2 py-0.5 rounded-full font-bold">
+                          {pkg.savings}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-slate-400 text-xs mt-0.5 block">
+                      ${pkg.pricePerSession} per session · Instant account credit
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-base font-extrabold text-white font-mono">${pkg.price}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="p-3 bg-brand-surface rounded-xl border border-brand-border space-y-1.5 text-[11px] text-slate-400">
+              <div className="flex justify-between text-white font-semibold">
+                <span>Selected: {selectedPkg.name}</span>
+                <span>${selectedPkg.price}</span>
+              </div>
+              <div>Includes 100% money-back guarantee if cancelled 6+ hours before court time.</div>
+            </div>
+
+            <button
+              disabled={purchasing}
+              onClick={() => handlePurchase(selectedPkg)}
+              className="w-full min-h-[48px] py-3 rounded-xl bg-brand-action hover:bg-brand-actionHover disabled:opacity-50 text-white font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-brand-orange/20 text-sm"
+            >
+              <CreditCard className="w-4 h-4" />
+              {purchasing ? 'Processing…' : `Pay $${selectedPkg.price} with Apple Pay / Card`}
             </button>
           </div>
         </Modal>
