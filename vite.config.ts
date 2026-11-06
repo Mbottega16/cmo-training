@@ -11,13 +11,15 @@ const page = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 // Dev mode skips it because Vite's hot reload needs inline scripts. The backend's address is allowed only when set.
 function csp(supabaseUrl: string | undefined): string {
   const backend = supabaseUrl ? ` ${new URL(supabaseUrl).origin} wss://${new URL(supabaseUrl).host}` : '';
+  // Film streams straight from the backend's storage through short-lived signed links.
+  const storage = supabaseUrl ? ` ${new URL(supabaseUrl).origin}` : '';
   return [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
     "font-src 'self'",
     "img-src 'self' data: blob:",
-    "media-src 'self' blob:",
+    `media-src 'self' blob:${storage}`,
     `connect-src 'self'${backend}`,
     "worker-src 'self'",
     "manifest-src 'self'",

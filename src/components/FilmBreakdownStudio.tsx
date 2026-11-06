@@ -98,6 +98,12 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [playingMemo, setPlayingMemo] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  /** Bumped to fetch a fresh signed link for a streamed clip. The links last 2 hours. */
+  const [linkRefresh, setLinkRefresh] = useState(0);
+  /** The clip whose link was refreshed after an error and has not loaded since, so a broken clip refreshes only once. */
+  const refreshedKey = useRef<string | null>(null);
+  /** Where to continue after a refreshed link loads. */
+  const resumeAt = useRef(0);
   const now = useNow(isRecording ? 250 : 5000);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -166,7 +172,29 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
       if (url) URL.revokeObjectURL(url);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filmId, film?.videoUrl, film?.videoKey]);
+  }, [filmId, film?.videoUrl, film?.videoKey, linkRefresh]);
+
+  const onVideoError = () => {
+    if (!videoSrc) return;
+    const key = film?.videoKey;
+    // A streamed clip's signed link has probably run out: get a fresh one once, then carry on from the same spot.
+    if (key && !film?.videoUrl && /^https?:/.test(videoSrc) && refreshedKey.current !== key) {
+      refreshedKey.current = key;
+      resumeAt.current = videoRef.current?.currentTime ?? 0;
+      setLinkRefresh(n => n + 1);
+      return;
+    }
+    setVideoError('This video could not load. Check the connection, or load a clip from this device.');
+  };
+
+  const onVideoLoaded = (video: HTMLVideoElement) => {
+    setDuration(video.duration);
+    refreshedKey.current = null;
+    if (resumeAt.current > 0) {
+      video.currentTime = Math.min(resumeAt.current, video.duration || resumeAt.current);
+      resumeAt.current = 0;
+    }
+  };
 
   // Stop any recording or playback when leaving the studio.
   useEffect(
@@ -526,11 +554,11 @@ export const FilmBreakdownStudio: React.FC<FilmBreakdownStudioProps> = ({ store,
                 src={videoSrc}
                 onTimeUpdate={e => setCurrentTime(e.currentTarget.currentTime)}
                 onSeeked={e => setCurrentTime(e.currentTarget.currentTime)}
-                onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
+                onLoadedMetadata={e => onVideoLoaded(e.currentTarget)}
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
-                onError={() => videoSrc && setVideoError('This video could not load. Check the connection, or load a clip from this device.')}
+                onError={onVideoError}
                 className="absolute inset-0 w-full h-full object-contain"
                 playsInline
                 preload="metadata"
