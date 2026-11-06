@@ -229,19 +229,22 @@ export const CoachFloorMode: React.FC<{ store: AppStore }> = ({ store }) => {
         >
           <form onSubmit={handleAssign} className="space-y-3.5 text-sm">
             <div>
-              <span className="block text-slate-400 font-semibold mb-1.5 text-[11px] uppercase tracking-wider">Quick Presets</span>
-              <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-none">
+              <span className="block text-slate-300 font-semibold mb-1 text-xs">Quick presets (fill the form, then edit)</span>
+              <div className="flex gap-2 overflow-x-auto pb-1.5">
                 {DRILL_PRESETS.map(p => (
                   <button
                     key={p.title}
                     type="button"
+                    aria-pressed={drillTitle === p.title}
                     onClick={() => {
                       setDrillTitle(p.title);
                       setDrillCategory(p.category);
                       setDrillReps(p.repsOrMinutes);
                       setDrillNote(p.notes);
                     }}
-                    className="shrink-0 text-xs px-2.5 py-1.5 rounded-lg bg-brand-surface border border-brand-border hover:border-brand-orange text-slate-300 hover:text-white transition font-medium"
+                    className={`shrink-0 min-h-[44px] text-xs px-3 rounded-lg border transition font-medium ${
+                      drillTitle === p.title ? 'border-brand-orange bg-brand-orange/10 text-white' : 'bg-brand-surface border-brand-border hover:border-brand-orange text-slate-300 hover:text-white'
+                    }`}
                   >
                     {p.title}
                   </button>
