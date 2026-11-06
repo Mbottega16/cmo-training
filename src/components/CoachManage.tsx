@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Plus, Minus, UserPlus, CalendarPlus, Trash2, KeyRound } from 'lucide-react';
 import type { AppStore } from '../store';
 import type { SessionType } from '../types';
-import { confirmedBookings, sessionPhase } from '../logic';
+import { confirmedBookings, sessionPhase, weeklyStarts } from '../logic';
 import { formatSessionTime, plural, sessionTypeLabel, useNow } from '../format';
 import { pageUrl } from '../router';
 import { Avatar, Toast, XpBadge, type ToastTone } from './ui';
@@ -53,17 +53,16 @@ export const CoachManage: React.FC<{ store: AppStore }> = ({ store }) => {
 
   const addSession = async (e: React.FormEvent) => {
     e.preventDefault();
-    const baseStart = new Date(startAt);
-    if (Number.isNaN(baseStart.getTime())) {
-      report({ ok: false, message: 'Invalid start time.' });
+    // datetime-local is the coach's local time; weeklyStarts keeps that wall-clock time across daylight-saving changes.
+    const starts = weeklyStarts(new Date(startAt), repeatWeeks);
+    if (starts.length === 0) {
+      report({ ok: false, message: 'Pick a start time.' });
       return;
     }
-    const weeks = Math.max(1, Math.min(12, repeatWeeks));
-    let lastResult: { ok: boolean; message: string } = { ok: true, message: '' };
-    for (let w = 0; w < weeks; w++) {
-      const start = new Date(baseStart.getTime() + w * 7 * 86_400_000);
-      const end = new Date(start.getTime() + minutes * 60_000);
-      lastResult = await dispatch(
+    let added = 0;
+    let last = '';
+    for (const start of starts) {
+      const r = await dispatch(
         {
           type: 'session.add',
           session: {
@@ -71,7 +70,7 @@ export const CoachManage: React.FC<{ store: AppStore }> = ({ store }) => {
             courtLocation: type === 'virtual_live' ? 'CMO Video Room' : where.trim(),
             courtAddress: type === 'virtual_live' ? 'Online' : '',
             start: start.toISOString(),
-            end: end.toISOString(),
+            end: new Date(start.getTime() + minutes * 60_000).toISOString(),
             type,
             maxCapacity: type === 'one_on_one' || type === 'virtual_live' ? 1 : capacity,
             price
@@ -79,14 +78,16 @@ export const CoachManage: React.FC<{ store: AppStore }> = ({ store }) => {
         },
         { quiet: true }
       );
-      if (!lastResult.ok) break;
+      if (!r.ok) {
+        // Say how many already exist, so the coach doesn't add them twice.
+        report({ ok: false, message: added > 0 ? `Added ${added} of ${starts.length} sessions. The next one failed: ${r.message}` : r.message });
+        return;
+      }
+      added += 1;
+      last = r.message;
     }
-    if (lastResult.ok) {
-      report({ ok: true, message: weeks > 1 ? `Scheduled ${weeks} weekly sessions.` : lastResult.message || 'Session added.' });
-      setTitle('');
-    } else {
-      report(lastResult);
-    }
+    report({ ok: true, message: starts.length > 1 ? `Scheduled ${starts.length} weekly sessions.` : last || 'Session added.' });
+    setTitle('');
   };
 
   const makeInvite = async (playerId: string, playerName: string) => {

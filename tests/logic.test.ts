@@ -1,4 +1,4 @@
-// Run with `npm test` (Node 23.6+ runs TypeScript directly).
+// Run with `npm test` (Node 22.6+ runs TypeScript directly; tests/run.mjs adds the flag Node 22 needs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSeed, DEFAULT_SETTINGS, STATE_VERSION } from '../src/seed.ts';
@@ -16,7 +16,9 @@ import {
   setAttendance,
   spotsLeft,
   undoStroke,
-  waiveLateCancel
+  waiveLateCancel,
+  weeklyStarts,
+  MAX_REPEAT_WEEKS
 } from '../src/logic.ts';
 import type { DemoState, Settings, Stroke } from '../src/types.ts';
 
@@ -263,4 +265,41 @@ test('one damaged record anywhere makes the whole saved state untrusted', () => 
     damage(s);
     assert.equal(isValidState(s, STATE_VERSION), false, label);
   }
+});
+
+/** Runs `fn` with the process in another time zone, then puts the old one back. */
+function inZone(zone: string, fn: () => void) {
+  const before = process.env.TZ;
+  process.env.TZ = zone;
+  try {
+    fn();
+  } finally {
+    if (before === undefined) delete process.env.TZ;
+    else process.env.TZ = before;
+  }
+}
+
+test('weekly repeats keep the local start time across daylight-saving changes', () => {
+  const WEEK = 7 * 24 * HOUR;
+  inZone('America/New_York', () => {
+    // Clocks go forward on Sunday 14 March 2027: a Monday 6 PM session is still 6 PM a week later.
+    const spring = weeklyStarts(new Date(2027, 2, 8, 18, 0), 2);
+    assert.deepEqual(spring.map(d => [d.getDate(), d.getHours(), d.getMinutes()]), [[8, 18, 0], [15, 18, 0]]);
+    assert.equal(spring[1].getTime() - spring[0].getTime(), WEEK - HOUR, 'the real gap is one hour short of 7 × 24 h');
+
+    // Clocks go back on Sunday 1 November 2026.
+    const fall = weeklyStarts(new Date(2026, 9, 30, 18, 30), 2);
+    assert.deepEqual(fall.map(d => [d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()]), [[9, 30, 18, 30], [10, 6, 18, 30]]);
+    assert.equal(fall[1].getTime() - fall[0].getTime(), WEEK + HOUR);
+  });
+});
+
+test('weekly repeats: one session per week, same weekday, between 1 and the maximum', () => {
+  const first = new Date(2026, 10, 9, 17, 0); // a Monday
+  const eight = weeklyStarts(first, 8);
+  assert.equal(eight.length, 8);
+  assert.ok(eight.every(d => d.getDay() === first.getDay() && d.getHours() === 17));
+  assert.equal(weeklyStarts(first, 0).length, 1, 'never fewer than the one session asked for');
+  assert.equal(weeklyStarts(first, 99).length, MAX_REPEAT_WEEKS);
+  assert.deepEqual(weeklyStarts(new Date('not a date'), 4), [], 'a bad start time makes no sessions');
 });

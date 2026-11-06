@@ -251,6 +251,22 @@ function patchFilm(state: DemoState, filmId: string, fn: (f: FilmReview) => Film
 
 const clampInt = (n: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(Number.isFinite(n) ? n : min)));
 
+/** Most weeks one "repeat weekly" can create at once. */
+export const MAX_REPEAT_WEEKS = 12;
+
+/**
+ * Start times for a session repeated weekly: the same local wall-clock time on the same weekday, so a 6 PM session
+ * stays at 6 PM after a daylight-saving change (adding 7 × 24 hours would move it to 5 PM or 7 PM).
+ */
+export function weeklyStarts(first: Date, weeks: number): Date[] {
+  if (Number.isNaN(first.getTime())) return [];
+  const count = clampInt(weeks, 1, MAX_REPEAT_WEEKS);
+  return Array.from(
+    { length: count },
+    (_, w) => new Date(first.getFullYear(), first.getMonth(), first.getDate() + 7 * w, first.getHours(), first.getMinutes(), first.getSeconds(), first.getMilliseconds())
+  );
+}
+
 export function validSession(s: NewSession): string | null {
   if (!s.title.trim()) return 'Give the session a title.';
   if (Number.isNaN(Date.parse(s.start)) || Number.isNaN(Date.parse(s.end))) return 'Pick a start and end time.';
