@@ -1,5 +1,18 @@
 # CMO Training — Session History
 
+## 2026-11-06 — Review of the commits after v0.4: honest athlete page, safe weekly repeats, streaming fix
+*PC · Claude · commits `cb53cf7` `965638b` `e36f583` `497ab54` `7630ee5`*
+- **Changed:** Removed the athlete "Buy credits" screen (it added free credits with a "Purchased!" message, made-up prices of $65/$300/$550 and a "money-back guarantee") and the "test push notification" for a made-up session. The athlete page says how to get credits and that nothing is sent yet. Weekly repeats keep local time and weekday across daylight-saving changes (`weeklyStarts`). Calendar files moved to `src/calendar.ts` with RFC 5545 escaping and folding. The CSP's `media-src` adds the Supabase origin so streamed film can load; a failed streamed clip gets one fresh signed link and resumes. Drill presets are 44 px with a pressed state. `npm test` runs on Node 22 (`tests/run.mjs`).
+- **Why:** `46f6da4` broke the settled decision (payments outside the app; only Coach adds credits; on the real backend `adjust_credits` refuses athletes, so the button would fail) and the honesty rule. Its streaming would have failed on every clip once the backend is connected, and its repeats moved sessions by an hour after a clock change.
+- **Verified:** 41/41 tests on Node 22.14 (2 new weekly-repeat tests, 3 calendar tests). Mutations each caught: 7 × 24 h repeats, no comma escaping, folding at 80 bytes. Build passes; a build with a placeholder backend URL puts its origin in `media-src`. Browser checks 97/97 in real Chrome at 390×844, 1366×768, 1920×1080 and WebKit at 390×844: booking with the new credits note, calendar download (valid `.ics`), 4 weekly sessions at the same time, presets fill the form, film upload takes the typed title; axe 0 violations on 4 screens per size; 0 console errors; no sideways scroll.
+- **Not checked:** anything on a real Supabase project (signed links, link refresh); WebKit video playback (Playwright's WebKit on Windows can't play MP4).
+- **Left open:** the owner's Supabase project; the coach's prices and packages; coach feedback.
+
+## 2026-11-03 (evening) — After v0.4: CI on Node 24, clock check, backend hardening, extra features
+*Machine not recorded · Claude for `9a8e05c` to `185bbf3`; `46f6da4` has no co-author line (another agent)*
+- **Changed:** CI runs on Node 24 with a test pattern that works there (`9a8e05c`, `952dc95`). The demo checks the clock against the server before it creates data, so a phone with a wrong clock no longer seeds sessions at wrong times (`b90eaf5`). Backend hardening (`185bbf3`): only invited members see the schedule and spots; invite codes expire after 14 days; 10 wrong codes in an hour lock that account out; SETUP-BACKEND.md has the owner create their account before connecting the app. `46f6da4` added drill presets, "repeat weekly", a Calendar (.ics) button, film streaming through signed links, a title prompt for uploaded film, a "Buy credits" mock and test push alerts.
+- **Verified:** 36/36 tests (one new SQL test: invite expiry and the guess limit). `46f6da4` came with no tests and no HISTORY or handoff entry; its review and fixes are in the 2026-11-06 entry.
+
 ## 2026-11-03 — v0.4: three pages, free backend, free hosting, late-cancel fix
 
 - Split into `/coach/`, `/athlete/` and `/dev/` (+ landing). The dev page toggles Coach / Athlete views and has Dev tools: tunable rules (late-cancel hours, grace hours, refill vs lock, XP, check-in window), time travel, athlete edits, demo export/import/reset, people & roles. Coach got a Manage tab (athletes, credits, invites, schedule).

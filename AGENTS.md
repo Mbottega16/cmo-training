@@ -12,6 +12,7 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
 - **For:** The coach behind CMO Training (the owner's stepbrother) and their high school, college and pro athletes.
 - **Platform / stack:** React 19, TypeScript 7, Vite 8 (multi-page), Tailwind 3, Lucide. Supabase free plan. GitHub Pages.
 - **Money:** Payments outside the app for now; the coach adds credits on Manage. Stripe later needs the owner's yes.
+  No prices or packages are set in the app; those are the coach's call.
 - **What "done" looks like:** The coach runs real sessions from the coach page, athletes book and get film on theirs.
 
 ## Settled decisions (don't re-argue)
@@ -28,6 +29,9 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
   server clock). Change both, and the tests for both.
 - No e-mails needed: sign-in is e-mail + password with confirmation off; access comes from 8-character invite codes.
 - The public repo holds **mock data only**. No real athlete names, phones, emails or film, ever.
+- **No pretend services.** Never show a payment, purchase, text, e-mail or push alert that did not happen: no mock
+  checkout, no "test notification". Say plainly what is not connected yet (web-bible honesty rule). Athletes can't
+  add their own credits; only staff can (`player.credits`, server-checked).
 
 ## How it's built
 - `index.html`, `coach/index.html`, `athlete/index.html`, `dev/index.html` → `src/entries/*.tsx` → `src/apps/boot.tsx`
@@ -35,9 +39,12 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
   AthletePage, DevPage, Landing) → `src/apps/screens.tsx` (coach and athlete screens, reused by the dev page).
 - Routing is the hash: coach `#/<tab>/<athleteId?>`, athlete `#/<tab>/<athleteId?>`, dev `#/coach/…`, `#/athlete/…`,
   `#/tools`. `src/router.ts` (`useHashParts`, `pageUrl` for sibling pages under any base path).
-- `src/logic.ts` — every rule; `applyCommand(state, Command, now)` is the one way state changes.
+- `src/logic.ts` — every rule; `applyCommand(state, Command, now)` is the one way state changes. Also `weeklyStarts`
+  (weekly repeats keep the local wall-clock time across daylight-saving changes).
+- `src/calendar.ts` — `.ics` file for a booked session (RFC 5545 escaping and line folding); the athlete's Calendar button.
 - `src/backend/` — `types.ts` (Backend, AuthApi), `local.ts` (demo: localStorage + Web Locks + IndexedDB +
-  BroadcastChannel), `supabase.ts` (RPCs, tables, storage, realtime, private call channels), `mapping.ts` (rows ↔
+  BroadcastChannel), `supabase.ts` (RPCs, tables, storage with 2-hour signed links so film streams, realtime,
+  private call channels), `mapping.ts` (rows ↔
   state), `index.ts` (picks Supabase when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are set, unless the dev page
   forced demo in this browser; supabase-js is lazy-loaded).
 - `src/store.ts` — `useAppStore(backend)`: `state`, `dispatch(cmd, {quiet})`, page-wide `problem`.
@@ -51,13 +58,17 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
 - `.github/workflows/pages.yml` (test → build → deploy), `keep-backend-awake.yml` (pings Supabase every 3 days).
 
 ## Commands & Verification
+- **Where it lives:** in the vault at `projects/cmo-training/app` on both computers (no Desktop `CMOTraining` clone on
+  the PC; the launchers, `workstation-sync.js` and the Mosaic crew look there first) · GitHub `Mbottega16/cmo-training`.
 - `npm run dev` — 127.0.0.1:5173 or the next free port (other projects on the Mac use 5173). `npm run phone` serves
   the built app to Wi-Fi.
-- `npm test` — 19 rule tests (`tests/logic.test.ts`) + 17 database tests (`tests/sql.test.ts`, real Postgres via
-  PGlite with stand-ins for Supabase's auth/storage/realtime). Node 23.6+.
+- `npm test` — 21 rule tests (`tests/logic.test.ts`) + 3 calendar tests (`tests/calendar.test.ts`) + 17 database
+  tests (`tests/sql.test.ts`, real Postgres via PGlite with stand-ins for Supabase's auth/storage/realtime).
+  Node 22.6+: `tests/run.mjs` adds type stripping where Node needs the flag (the PC has Node 22.14).
 - `npm run build` — `tsc` + Vite. Must pass with zero errors.
 - Browser checks (not committed; recipe in the vault's `skills/web-bible`): real Chrome (`channel: 'chrome'`) at
   390×844, 1366×768, 1920×1080 with fake camera/mic, WebKit for Safari, axe-core for WCAG 2.2 AA, attack pass.
+  Where Playwright lives on each computer, and two harmless WebKit messages: web-bible section 3.
 - Never verified against a real Supabase project until the owner creates one (see SETUP-BACKEND.md); the SQL is tested
   on PGlite and the JS adapter is type-checked only.
 
@@ -70,15 +81,23 @@ a demo mode with no backend, and a free Supabase backend that switches on with t
 - Sample clip URLs are site-root relative: resolve with `pageUrl('')`, never relative to the page.
 - The service worker matches cached files with `ignoreVary` (servers send `Vary: Origin`; module scripts carry Origin).
 - Media keys must be `films/<athleteId>/…` or `memos/<athleteId>/…` (storage RLS reads the second folder).
-- CSP is `'self'` plus the Supabase origin when configured. `assetsInlineLimit: 0` keeps fonts out of `data:` URLs.
+- CSP is `'self'` plus the Supabase origin when configured (`connect-src`, and `media-src` for streamed film).
+  `assetsInlineLimit: 0` keeps fonts out of `data:` URLs.
 - Demo data is per browser and editable by its owner; real trust needs the backend. Coach/dev pages are open in demo.
 
 ## Session Handoff (Last Worked On · Current State · Next Up)
-- **Last Worked On (2026-11-03):** v0.4. Split into coach/athlete/dev pages + landing; Dev tools (rules, time travel,
-  athlete edits, demo export/import/reset, people & roles); coach Manage tab; free Supabase backend (schema + RLS +
-  server-side rules + invites + storage + realtime + cron) behind a Backend interface; real two-way WebRTC calls;
-  late-cancel fix (refill refunds, trusted clock, staff-only waive); GitHub Pages deploy + keep-awake; MIT licence.
-- **Current State:** 36/36 unit+SQL tests; Chrome 49/49 browser checks, 0 console errors; WebKit 11/11; axe 0
-  violations on 22 screen/size combinations. Pages deploys in demo mode until the Supabase variables exist.
-- **Next Up:** Owner creates the free Supabase project (SETUP-BACKEND.md), then verify the live backend end to end
-  (sign-up, invites, booking on two phones, a call across two networks). Then: reminders (web push), Stripe (needs a yes).
+*Overwrite this at the end of every session; move the previous handoff into `HISTORY.md` first.*
+- **Last Worked On (2026-11-06, PC):** Reviewed the four commits after v0.4. Fixed what `46f6da4` broke: removed the
+  athlete "Buy credits" mock (free credits, made-up prices and guarantee) and the test push alert; weekly repeats now
+  keep local time across daylight-saving changes; streamed film was blocked by the CSP (fixed) and an expired 2-hour
+  link now refreshes once; drill presets are 44 px; calendar files are built and tested in `src/calendar.ts`.
+  `npm test` now runs on Node 22.
+- **Current State:** 41/41 tests (Node 22.14); build passes. Browser checks 97/97: real Chrome at 3 sizes + WebKit
+  390×844 (booking, calendar download, weekly repeat, drill presets, film upload), axe 0 violations, 0 console
+  errors. Not checked: anything on a real Supabase project (none exists yet); WebKit video playback.
+- **Next Up:**
+  1. Owner creates the free Supabase project (SETUP-BACKEND.md). Then verify end to end: sign-up, invites, booking
+     on two phones, a call across two networks, streamed film (also after its 2-hour link runs out).
+  2. Coach tries the demo: notes on court use, button sizes, the film workflow, cancel rules, the drill presets.
+  3. Then, each with the owner's yes: reminders (web push), Stripe (fees), a TURN server if calls fail on some
+     networks (STUN only today).
